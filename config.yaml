@@ -1,0 +1,213 @@
+# ==========================================
+# 🛠️ NODEROUTER CONFIGURATION FILE
+# ==========================================
+# This file controls all aspects of your NodeRouter dashboard.
+# Edit the values below to match your node setup.
+# Changes are applied automatically - no restart required!
+# ==========================================
+
+# ------------------------------------------
+# ⏱️ GLOBAL SETTINGS
+# ------------------------------------------
+# How often should NodeRouter refresh data from your nodes?
+# Value is in seconds. Recommended: 10-30 seconds.
+# Too fast may overwhelm your nodes; too slow means old data.
+# Can be changed on the fly, it will update after the next refresh.
+global_refresh_interval: 10
+
+# ------------------------------------------
+# 📡 SERVICE HEALTH INDICATORS
+# ------------------------------------------
+# Show RPC response time (latency) badge next to each module's status on desktop.
+# Helps identify slow connections or overloaded nodes.
+show_latency: true
+
+# ------------------------------------------
+# 🖼️ FAVICON (Optional)
+# ------------------------------------------
+# Customize the browser tab icon. Default is the Bitcoin logo.
+# Changes apply on next refresh - no container rebuild needed!
+#
+# Options:
+# 1. Remote URL: "https://example.com/favicon.png"
+# 2. Dashboardicon name (from https://github.com/homarr-labs/dashboard-icons):
+#    - By name: "youtube", "plex", "radarr", etc.
+#    - With extension: "youtube.png", "plex.svg"
+# 3. Local embedded icons: "bitcoin", "fulcrum", "mempool", "monero"
+#
+# Leave empty or omit to use the default Bitcoin logo.
+favicon: "bitcoin"
+
+# ------------------------------------------
+# 🅱️ BITCOIN CORE (Required Base Module)
+# ------------------------------------------
+# Connects to your Bitcoin Core node via JSON-RPC.
+# This module is REQUIRED - NodeRouter needs Bitcoin Core as the foundation.
+# The dashboard uses Bitcoin Core data for sync comparison (e.g. Fulcrum header height
+# is compared against Bitcoin headers). Disabling this will hide the Bitcoin module
+# and break sync comparisons for other modules.
+#
+# How to find your RPC credentials:
+# 1. Check your bitcoin.conf file (usually in ~/.bitcoin/)
+# 2. Look for 'rpcuser' and 'rpcpassword' lines
+# 3. Ensure 'rpcallowip' includes the NodeRouter container IP
+# ------------------------------------------
+bitcoin_core:
+  # Enable or disable Bitcoin Core monitoring
+  # WARNING: Disabling this will hide the Bitcoin module and break sync comparisons.
+  # It is strongly recommended to keep this enabled.
+  enabled: true
+  
+  # Optional: Make the module title clickable to open a URL in a new tab
+  # Leave empty "" or omit to keep title non-clickable
+  # title_link: "http://192.168.0.211:8080"
+  
+  # Number of recent blocks to display (6-30, default 15)
+  # Changes apply on next refresh — no restart needed!
+  recent_blocks_count: 30
+  
+  # The RPC address of your Bitcoin Core node
+  # Format: http://IP_ADDRESS:PORT
+  # Default RPC port is 8332 for mainnet
+  # Example: "http://192.168.1.50:8332"
+  # For local machine: "http://127.0.0.1:8332"
+  # IMPORTANT: Include the http:// prefix!
+  rpc_address: "http://192.168.0.211:8332"
+  
+  # Your RPC username (from bitcoin.conf)
+  # This is the 'rpcuser=' value in your config
+  rpc_user: "satoshi"
+  
+  # Your RPC password (from bitcoin.conf)
+  # This is the 'rpcpassword=' value in your config
+  # SECURITY: Keep this file secure!
+  rpc_password: "satoshi"
+  
+  # ------------------------------------------
+  # 📱 WALLET PAIRING ADDRESSES
+  # ------------------------------------------
+  # These addresses are displayed in the Wallet Pairing card
+  # with QR codes for easy mobile wallet connection.
+  # 
+  # Find these in your bitcoin.conf:
+  # - 'externalip=' for your clearnet address
+  # - 'onion=' for your Tor hidden service address
+  # ------------------------------------------
+  
+  # Your public Clearnet IP and port
+  # Format: IP_ADDRESS:PORT (default port 8333)
+  # Example: "84.32.11.22:8333"
+  # Leave empty "" if you only use Tor
+  clearnet_address: "84.32.11.22:8333"
+  
+  # Your Tor hidden service address
+  # Format: ONION_ADDRESS.onion:PORT
+  # Example: "abcdefghijklmnopqrstuvwxyz1234567890.onion:8333"
+  # Find this in your Tor hidden service config
+  # Leave empty "" if you don't use Tor
+  tor_address: "abcdefghijklmnopqrstuvwxyz1234567890.onion:8333"
+
+# ------------------------------------------
+# 📊 MEMPOOL SPACE (Optional Module)
+# ------------------------------------------
+# Connects to your local Mempool Space instance.
+# Provides fee estimation and mempool block projections.
+# 
+# Requires a running Mempool Space instance.
+# GitHub: https://github.com/mempool/mempool
+# ------------------------------------------
+mempool:
+  # Enable or disable Mempool monitoring
+  # Set to 'false' if you don't have Mempool installed
+  enabled: true
+  
+  # Optional: Make the module title clickable
+  # title_link: "http://192.168.0.211:3000"
+  
+  # The API endpoint of your Mempool instance
+  # Format: http://IP_ADDRESS:PORT/api
+  # Default Mempool API port is 4080
+  # IMPORTANT: Must end with '/api'
+  # Example: "http://192.168.1.50:4080/api"
+  api_endpoint: "http://192.168.0.211:4080/api"
+  
+  # Enable sub-sat fee rate precision (0.1 sat/vB floor instead of 1 sat/vB)
+  # Uses the /api/v2/fees/recommended?subsat=1 endpoint
+  # Default: false (uses integer sat/vB with 1 sat/vB floor)
+  subsat: true
+
+# ------------------------------------------
+# ⚡ FULCRUM - ELECTRUM INDEXER (Optional Module)
+# ------------------------------------------
+# Connects to your Fulcrum Electrum Server.
+# Provides Electrum wallet connection strings and sync status.
+# 
+# Requires a running Fulcrum instance.
+# GitHub: https://github.com/cculianu/Fulcrum
+# ------------------------------------------
+fulcrum:
+  # Enable or disable Fulcrum monitoring
+  # Set to 'false' if you don't have Fulcrum installed
+  enabled: true
+  
+  # Optional: Make the module title clickable
+  # title_link: "http://192.168.0.211:50002"
+  
+  # The IP address or hostname of your Fulcrum server
+  # Example: "192.168.1.50"
+  rpc_address: "192.168.0.211"
+  
+  # The TCP/SSL port of your Fulcrum server
+  # Default SSL port: 50002
+  # Default TCP port: 50001
+  rpc_port: 50001
+  
+  # Use SSL for connection?
+  # true = SSL encrypted (recommended, port 50002)
+  # false = Plain TCP (port 50001)
+  ssl_enabled: false
+  
+  # ------------------------------------------
+  # 📱 ELECTRUM WALLET CONNECTION STRINGS
+  # ------------------------------------------
+  # These are displayed with QR codes for easy
+  # Electrum wallet pairing.
+  # ------------------------------------------
+  
+  # Clearnet address for Electrum wallets
+  # Format: IP_ADDRESS:PORT
+  # Example: "84.32.11.22:50002"
+  clearnet_address: "84.32.11.22:50002"
+  
+  # Tor address for Electrum wallets
+  # Format: ONION_ADDRESS.onion:PORT
+  # Example: "xyz123456.onion:50002"
+  tor_address: "xyz123456.onion:50002"
+
+# ------------------------------------------
+# 🟠 MONERO NODE (Optional Module)
+# ------------------------------------------
+# Connects to your Monero node (monerod) via JSON-RPC.
+# Provides comprehensive telemetry including sync status,
+# connections, and network statistics.
+# 
+# Requires a running monerod instance with RPC enabled.
+# ------------------------------------------
+monero:
+  # Enable or disable Monero monitoring
+  # Set to 'false' if you don't have a Monero node
+  enabled: true
+  
+  # Optional: Make the module title clickable
+  # title_link: "http://192.168.0.211:8081"
+  
+  # The RPC address of your Monero node
+  # Format: http://IP_ADDRESS:PORT
+  # Default RPC port is 18081 for mainnet
+  # Example: "http://192.168.1.50:18081"
+  # IMPORTANT: Include the http:// prefix!
+  rpc_address: "http://192.168.0.211:18089"
+  
+  # Number of recent blocks to display (6-30, default 15)
+  # Changes apply on next refresh — no restart needed!
+  recent_blocks_count: 15

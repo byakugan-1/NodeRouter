@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0b0b0b">
+<title>NodeRouter</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.ico?v={{.FaviconVer}}">
+<link rel="manifest" href="/static/manifest.json">
+<link rel="stylesheet" href="/static/style.css?v={{.FaviconVer}}">
+</head>
+<body data-refresh-int="{{.RefreshInt}}" data-btc-clear="{{if .Bitcoin}}{{.Bitcoin.ClearnetCount}}{{else}}0{{end}}" data-btc-tor="{{if .Bitcoin}}{{.Bitcoin.TorCount}}{{else}}0{{end}}" data-btc-i2p="{{if .Bitcoin}}{{.Bitcoin.I2PCount}}{{else}}0{{end}}">
+<header class="header">
+  <div class="header-center">
+    <div class="logo-wrap">
+      <h1 class="logo">NodeRouter</h1>
+      <div class="refresh-line"><div class="refresh-line-progress" id="refreshLine"></div></div>
+    </div>
+  </div>
+</header>
+
+<main class="dashboard">
+{{if .Bitcoin}}
+<section class="module" id="modBtc">
+  <div class="module-header" id="btcHdr">
+    <div class="module-title-row">
+      <img src="/static/logos/bitcoin.svg" alt="" class="module-icon module-icon-img">
+      <div class="module-title-text">
+        {{if .Bitcoin.TitleLink}}<h2 class="module-title clickable" onclick="window.open('{{.Bitcoin.TitleLink}}','_blank')">Bitcoin Core</h2>{{else}}<h2 class="module-title">Bitcoin Core</h2>{{end}}
+      </div>
+      {{if .Bitcoin.OnlyTor}}<span class="tor-badge visible">&#x1F9C5;</span>{{end}}
+      <span class="status-dot {{if .Bitcoin.Connected}}ok{{else}}err{{end}}" data-btc-status></span>
+      <span class="status-text" data-btc-status-text>{{if .Bitcoin.Connected}}Connected{{else}}{{.Bitcoin.Error}}{{end}}</span>
+      {{if .ShowLatency}}<span class="latency-badge" data-btc-latency>{{if .Bitcoin.Connected}}{{.Bitcoin.LatencyMs}}ms{{else}}--{{end}}</span>{{end}}
+    </div>
+  </div>
+  <div class="module-body" id="btcBody">
+    <div class="sync-row"><span class="sync-label">Sync</span><span class="sync-fraction" data-btc-sync>{{formatNum .Bitcoin.Blocks}} / {{formatNum .Bitcoin.Headers}} ({{printf "%.2f" .Bitcoin.SyncProgress}}%)</span></div>
+    <div class="sync-bar-container"><div class="sync-bar {{syncClass .Bitcoin.SyncProgress}}" data-btc-sync-bar style="width:{{printf "%.1f" .Bitcoin.SyncProgress}}%"></div></div>
+    <div class="stats-row btc-tiles">
+      <div class="stat-card"><span class="stat-label">Blockchain Size</span><span class="stat-value" data-btc-size>{{formatBytes .Bitcoin.SizeOnDisk}}</span></div>
+      <div class="stat-card"><span class="stat-label">Uptime</span><span class="stat-value" data-btc-uptime>{{formatUptime .Bitcoin.Uptime}}</span></div>
+      <div class="stat-card"><span class="stat-label">Version</span><span class="stat-value" data-btc-version>{{.Bitcoin.Version}}</span></div>
+      <div class="stat-card"><span class="stat-label">Difficulty</span><span class="stat-value" data-btc-difficulty>{{printf "%.2fT" (divFloat .Bitcoin.Difficulty 1000000000000)}}</span></div>
+      <div class="stat-card"><span class="stat-label">IBD</span><span class="stat-value" data-btc-ibd>{{if .Bitcoin.IBD}}Yes{{else}}No{{end}}</span></div>
+      <div class="stat-card"><span class="stat-label">Pruned</span><span class="stat-value" data-btc-pruned>{{if .Bitcoin.Pruned}}Yes{{else}}No{{end}}</span></div>
+      <div class="stat-card"><span class="stat-label">Mempool</span><span class="stat-value" data-btc-mempool>{{formatBytes .Bitcoin.MempoolUsage}}</span><span class="stat-sub" data-btc-mempool-sub>{{commaInt .Bitcoin.MempoolSize}} tx</span></div>
+      <div class="stat-card clickable" id="peersCard" title="Click for peers"><span class="stat-label peers-clickable">Peers</span><span class="stat-value" data-btc-peers>{{.Bitcoin.Connections}}</span><span class="stat-sub" data-btc-peers-sub>{{.Bitcoin.InboundCount}} in / {{.Bitcoin.OutboundCount}} out</span></div>
+    </div>
+    <!-- Blockchain Graphic -->
+    <div class="blockchain-graphic">
+      <div class="blockchain-label">Recent Blocks</div>
+      <div class="chain-visual" data-btc-blocks>
+        {{range $i, $block := .Bitcoin.RecentBlocks}}
+        {{if gt $i 0}}<div class="chain-link"></div>{{end}}
+        <div class="chain-block{{if eq $i 0}} new-block{{end}}" data-block-index="{{$i}}">
+          <div class="block-height" data-block-height="{{$i}}">#{{.Height}}</div>
+          <div class="block-size" data-block-size="{{$i}}">{{printf "%.1f" .SizeMB}} MB</div>
+          <div class="block-tx" data-block-tx="{{$i}}">{{commaInt .TxCount}} tx</div>
+          <div class="block-age" data-block-age="{{$i}}">{{.AgeStr}}</div>
+        </div>
+        {{end}}
+      </div>
+    </div>
+  </div>
+</section>
+{{end}}
+
+{{if .Mempool}}
+<section class="module" id="modMp">
+  <div class="module-header" id="mpHdr">
+    <div class="module-title-row">
+      <img src="/static/logos/mempool.svg" alt="" class="module-icon module-icon-img">
+      <div class="module-title-text">
+        {{if .Mempool.TitleLink}}<h2 class="module-title clickable" onclick="window.open('{{.Mempool.TitleLink}}','_blank')">Mempool Space</h2>{{else}}<h2 class="module-title">Mempool Space</h2>{{end}}
+      </div>
+      <span class="status-dot {{if .Mempool.Connected}}ok{{else}}err{{end}}" data-mp-status></span>
+      <span class="status-text" data-mp-status-text>{{if .Mempool.Connected}}Connected{{else}}{{.Mempool.Error}}{{end}}</span>
+      {{if .ShowLatency}}<span class="latency-badge" data-mp-latency>{{if .Mempool.Connected}}{{.Mempool.LatencyMs}}ms{{else}}--{{end}}</span>{{end}}
+    </div>
+    <button class="expand-btn" id="mpBtn" aria-label="Toggle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></button>
+  </div>
+  <div class="module-body collapsed" id="mpBody">
+    {{if gt .Mempool.PriceUSD 0.0}}<div class="price-row"><span class="price-label">BTC Price</span><span class="price-value" data-mp-price>${{commaInt (int .Mempool.PriceUSD)}}</span></div>{{end}}
+    <div class="fees-super-tile">
+      <div class="fee-item">
+        <span class="fee-tier-label">No Priority</span>
+        <span class="fee-value" data-mp-fee-economy>{{if .Mempool.Subsat}}{{printf "%.1f" .Mempool.Economy}}{{else}}{{.Mempool.Economy}}{{end}}</span>
+        <span class="fee-unit">sat/vB</span>
+      </div>
+      <div class="fee-divider"></div>
+      <div class="fee-item">
+        <span class="fee-tier-label">Hour</span>
+        <span class="fee-value" data-mp-fee-hour>{{if .Mempool.Subsat}}{{printf "%.1f" .Mempool.Hour}}{{else}}{{.Mempool.Hour}}{{end}}</span>
+        <span class="fee-unit">sat/vB</span>
+      </div>
+      <div class="fee-divider"></div>
+      <div class="fee-item">
+        <span class="fee-tier-label">Half Hour</span>
+        <span class="fee-value" data-mp-fee-halfhour>{{if .Mempool.Subsat}}{{printf "%.1f" .Mempool.HalfHour}}{{else}}{{.Mempool.HalfHour}}{{end}}</span>
+        <span class="fee-unit">sat/vB</span>
+      </div>
+      <div class="fee-divider"></div>
+      <div class="fee-item fee-fastest">
+        <span class="fee-tier-label">Fastest</span>
+        <span class="fee-value" data-mp-fee-fastest>{{if lt .Mempool.Fastest 1.0}}{{if .Mempool.Subsat}}{{printf "%.1f" .Mempool.Fastest}}{{else}}{{.Mempool.Fastest}}{{end}}{{else}}{{ceilFloat .Mempool.Fastest}}{{end}}</span>
+        <span class="fee-unit">sat/vB</span>
+      </div>
+    </div>
+    <div class="epoch-super-tile">
+      <div class="epoch-item">
+        <span class="epoch-label">Epoch Progress</span>
+        <span class="epoch-value" data-mp-epoch-pct>{{if .Mempool.EpochPct}}{{printf "%.1f" .Mempool.EpochPct}}%{{else}}--{{end}}</span>
+      </div>
+      <div class="epoch-divider"></div>
+      <div class="epoch-item">
+        <span class="epoch-label">Est. Change</span>
+        <span class="epoch-value" data-mp-epoch-chg>{{if .Mempool.EpochChg}}{{if gt .Mempool.EpochChg 0.0}}+{{end}}{{printf "%.2f" .Mempool.EpochChg}}%{{else}}--{{end}}</span>
+      </div>
+      <div class="epoch-divider"></div>
+      <div class="epoch-item">
+        <span class="epoch-label">Blocks Left</span>
+        <span class="epoch-value" data-mp-epoch-left>{{if .Mempool.EpochLeft}}{{commaInt .Mempool.EpochLeft}}{{else}}--{{end}}</span>
+      </div>
+    </div>
+  </div>
+</section>
+{{end}}
+
+{{if .Fulcrum}}
+<section class="module" id="modFul">
+  <div class="module-header" id="fulHdr">
+    <div class="module-title-row">
+      <img src="/static/logos/fulcrum.png" alt="" class="module-icon module-icon-img">
+      <div class="module-title-text">
+        {{if .Fulcrum.TitleLink}}<h2 class="module-title clickable" onclick="window.open('{{.Fulcrum.TitleLink}}','_blank')">Fulcrum</h2>{{else}}<h2 class="module-title">Fulcrum</h2>{{end}}
+      </div>
+      <span class="status-dot {{if .Fulcrum.Connected}}ok{{else}}err{{end}}" data-ful-status></span>
+      <span class="status-text" data-ful-status-text>{{if .Fulcrum.Connected}}Connected{{else}}{{.Fulcrum.Error}}{{end}}</span>
+      {{if .ShowLatency}}<span class="latency-badge" data-ful-latency>{{if .Fulcrum.Connected}}{{.Fulcrum.LatencyMs}}ms{{else}}--{{end}}</span>{{end}}
+    </div>
+    <button class="expand-btn" id="fulBtn" aria-label="Toggle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></button>
+  </div>
+  <div class="module-body collapsed" id="fulBody">
+    <div class="sync-row"><span class="sync-label">Sync</span><span class="sync-fraction" data-ful-sync>{{if .Fulcrum.Connected}}{{formatNum .Fulcrum.HeaderHeight}} / {{if .Bitcoin}}{{formatNum .Bitcoin.Headers}}{{else}}--{{end}} ({{printf "%.2f" .Fulcrum.SyncPct}}%){{else}}--{{end}}</span></div>
+    <div class="sync-bar-container"><div class="sync-bar {{syncClass .Fulcrum.SyncPct}}" data-ful-sync-bar style="width:{{printf "%.1f" .Fulcrum.SyncPct}}%"></div></div>
+    <div class="stats-row">
+      <div class="stat-card full-mobile"><span class="stat-label">Version</span><span class="stat-value" data-ful-version>{{.Fulcrum.Version}}</span></div>
+    </div>
+  </div>
+</section>
+{{end}}
+
+{{if .Monero}}
+<section class="module" id="modXmr">
+  <div class="module-header" id="xmrHdr">
+    <div class="module-title-row">
+      <img src="/static/logos/monero.png" alt="" class="module-icon module-icon-img">
+      <div class="module-title-text">
+        {{if .Monero.TitleLink}}<h2 class="module-title clickable" onclick="window.open('{{.Monero.TitleLink}}','_blank')">Monero Node</h2>{{else}}<h2 class="module-title">Monero Node</h2>{{end}}
+      </div>
+      <span class="status-dot {{if .Monero.Connected}}ok{{else}}err{{end}}" data-xmr-status></span>
+      <span class="status-text" data-xmr-status-text>{{if .Monero.Connected}}Connected{{else}}{{.Monero.Error}}{{end}}</span>
+      {{if .ShowLatency}}<span class="latency-badge" data-xmr-latency>{{if .Monero.Connected}}{{.Monero.LatencyMs}}ms{{else}}--{{end}}</span>{{end}}
+    </div>
+    <button class="expand-btn" id="xmrBtn" aria-label="Toggle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></button>
+  </div>
+  <div class="module-body collapsed" id="xmrBody">
+    <div class="sync-row"><span class="sync-label">Sync</span><span class="sync-fraction" data-xmr-sync>{{.Monero.Height}} / {{.Monero.TargetHeight}} ({{printf "%.2f" .Monero.SyncProgress}}%)</span></div>
+    <div class="sync-bar-container"><div class="sync-bar {{syncClass .Monero.SyncProgress}}" data-xmr-sync-bar style="width:{{printf "%.1f" .Monero.SyncProgress}}%"></div></div>
+    <div class="stats-row xmr-tiles">
+      <div class="stat-card"><span class="stat-label">Database Size</span><span class="stat-value" data-xmr-dbsize>{{formatBytes .Monero.DbSize}}</span></div>
+      <div class="stat-card"><span class="stat-label">TX Pool</span><span class="stat-value" data-xmr-txpool>{{commaInt .Monero.TxPool}}</span></div>
+      <div class="stat-card"><span class="stat-label">Difficulty</span><span class="stat-value" data-xmr-diff>{{printf "%.2fT" (divFloat .Monero.Difficulty 1000000000000)}}</span></div>
+      <div class="stat-card"><span class="stat-label">Total TXs</span><span class="stat-value" data-xmr-txcount>{{commaInt .Monero.TxCount}}</span></div>
+    </div>
+    <!-- Monero Blockchain Graphic -->
+    <div class="blockchain-graphic">
+      <div class="blockchain-label">Recent Blocks</div>
+      <div class="chain-visual" data-xmr-blocks>
+        {{range $i, $block := .Monero.RecentBlocks}}
+        {{if gt $i 0}}<div class="chain-link"></div>{{end}}
+        <div class="chain-block{{if eq $i 0}} new-block{{end}}" data-xmr-block-index="{{$i}}">
+          <div class="block-height" data-xmr-block-height="{{$i}}">#{{.Height}}</div>
+          <div class="block-size" data-xmr-block-size="{{$i}}">{{printf "%.3f" .SizeMB}} MB</div>
+          <div class="block-tx" data-xmr-block-tx="{{$i}}">{{commaInt .TxCount}} tx</div>
+          <div class="block-age" data-xmr-block-age="{{$i}}">{{.AgeStr}}</div>
+        </div>
+        {{end}}
+      </div>
+    </div>
+  </div>
+</section>
+{{end}}
+
+</main>
+
+<!-- Bitcoin Peer Overlay -->
+<div class="overlay" id="peerOvl">
+  <div class="overlay-panel">
+    <div class="overlay-header"><h2>Bitcoin Peer Topology</h2><button class="close-btn" onclick="closePeer()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button></div>
+    <div class="overlay-content">
+      <div class="chart-section">
+        <div class="chart-wrapper"><canvas id="peerChart" width="220" height="220"></canvas><div class="chart-center"><span class="chart-total" id="chartTotal">{{if .Bitcoin}}{{.Bitcoin.Connections}}{{else}}0{{end}}</span><span class="chart-label">Peers</span></div></div>
+        <div class="chart-legend">
+          <div class="legend-row"><span class="legend-dot" style="background:#ff9500"></span><span class="legend-name">Clearnet</span><span class="legend-val" id="legClear">{{if .Bitcoin}}{{.Bitcoin.ClearnetCount}}{{else}}0{{end}}</span></div>
+          <div class="legend-row"><span class="legend-dot" style="background:#af52de"></span><span class="legend-name">Tor</span><span class="legend-val" id="legTor">{{if .Bitcoin}}{{.Bitcoin.TorCount}}{{else}}0{{end}}</span></div>
+          <div class="legend-row"><span class="legend-dot" style="background:#636366"></span><span class="legend-name">I2P</span><span class="legend-val" id="legI2p">{{if .Bitcoin}}{{.Bitcoin.I2PCount}}{{else}}0{{end}}</span></div>
+        </div>
+      </div>
+      <div class="peer-table-wrap">
+        <table class="peer-table"><thead><tr><th>Address</th><th>Client</th><th>Dir</th><th>Ping</th><th>Sent</th><th>Recv</th></tr></thead><tbody id="peerTbody">
+          {{if .Bitcoin}}{{range .Bitcoin.Peers}}<tr><td title="{{.Addr}}">{{if gt (len .Addr) 30}}{{slice .Addr 0 30}}...{{else}}{{.Addr}}{{end}}</td><td>{{.Subver}}</td><td class="{{if .Inbound}}dir-in{{else}}dir-out{{end}}">{{if .Inbound}}In{{else}}Out{{end}}</td><td>{{printf "%.1f" .PingTime}} ms</td><td>{{formatBytes .BytesSent}}</td><td>{{formatBytes .BytesRecv}}</td></tr>{{end}}{{end}}
+        </tbody></table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Monero Peer Overlay -->
+<div class="overlay" id="xmrPeerOvl">
+  <div class="overlay-panel">
+    <div class="overlay-header"><h2>Monero Peer Topology</h2><button class="close-btn" onclick="closeXmrPeer()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button></div>
+    <div class="overlay-content">
+      <div class="chart-section">
+        <div class="chart-wrapper"><canvas id="xmrPeerChart" width="220" height="220"></canvas><div class="chart-center"><span class="chart-total" id="xmrChartTotal">{{if .Monero}}{{.Monero.Connections}}{{else}}0{{end}}</span><span class="chart-label">Peers</span></div></div>
+        <div class="chart-legend">
+          <div class="legend-row"><span class="legend-dot" style="background:#ff9500"></span><span class="legend-name">Inbound</span><span class="legend-val" id="xmrLegIn">{{if .Monero}}{{.Monero.InPeers}}{{else}}0{{end}}</span></div>
+          <div class="legend-row"><span class="legend-dot" style="background:#0a84ff"></span><span class="legend-name">Outbound</span><span class="legend-val" id="xmrLegOut">{{if .Monero}}{{.Monero.OutPeers}}{{else}}0{{end}}</span></div>
+        </div>
+      </div>
+      <div class="peer-table-wrap">
+        <table class="peer-table"><thead><tr><th>Host</th><th>Port</th><th>Height</th><th>Dir</th><th>Recv</th><th>Sent</th></tr></thead><tbody id="xmrPeerTbody">
+          {{if .Monero}}{{range .Monero.Peers}}<tr><td title="{{.Host}}">{{if gt (len .Host) 30}}{{slice .Host 0 30}}...{{else}}{{.Host}}{{end}}</td><td>{{.Port}}</td><td>{{commaInt .Height}}</td><td class="{{if .Inbound}}dir-in{{else}}dir-out{{end}}">{{if .Inbound}}In{{else}}Out{{end}}</td><td>{{formatBytes .RecvCount}}</td><td>{{formatBytes .SendCount}}</td></tr>{{end}}{{end}}
+        </tbody></table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<footer class="footer"><a href="https://github.com" target="_blank" rel="noopener" class="footer-link"><svg class="footer-github" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>NodeRouter</a><span class="footer-dot">&middot;</span><span id="lastUpdate">Updated {{.LastSuccess | formatLastTime}}</span><span class="footer-dot">&middot;</span><span id="refreshInterval">Updates every {{.RefreshInt}}s</span></footer>
+
+<script src="/static/script.js"></script>
+</body>
+</html>
