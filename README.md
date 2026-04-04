@@ -88,7 +88,7 @@ The Go backend polls all enabled services concurrently on each refresh cycle. Bl
 
 ```bash
 # 1. Clone and configure
-git clone <repo> && cd noderouter
+git clone https://github.com/byakugan-1/NodeRouter && cd NodeRouter
 # Edit config.yaml with your node credentials
 
 # 2. Build and run

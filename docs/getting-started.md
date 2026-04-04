@@ -40,29 +40,107 @@
 
 ## Installation
 
-### Docker Compose (Recommended)
+You have two options: use the **prebuilt image** from GitHub Container Registry (fastest), or **build locally** from source.
+
+---
+
+### Option 1: Prebuilt Image (Recommended)
+
+Pull the latest prebuilt image directly from GitHub Container Registry. No need to clone the repository.
+
+#### Using Docker Compose
+
+Create a `docker-compose.yml` file:
+
+```yaml
+services:
+  noderouter:
+    image: ghcr.io/byakugan-1/noderouter:latest
+    container_name: noderouter
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    restart: unless-stopped
+    # Optional: Resource limits
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: "0.5"
+    #       memory: 128M
+    #     reservations:
+    #       cpus: "0.1"
+    #       memory: 32M
+```
+
+The image is hosted at `ghcr.io/byakugan-1/noderouter`.
 
 ```bash
-# Clone the repository
-git clone <repo-url> && cd noderouter
+# Download the sample config.yaml
+curl -O https://raw.githubusercontent.com/byakugan-1/NodeRouter/refs/heads/main/config.yaml
 
-# Edit configuration
+# Edit with your node credentials
 nano config.yaml
 
-# Build and start
+# Start
 docker compose up -d
 
 # View logs
 docker compose logs -f
 ```
 
-### Manual Docker
+#### Using Docker Run
 
 ```bash
-# Build image
+# Download the sample config.yaml
+curl -O https://raw.githubusercontent.com/byakugan-1/NodeRouter/refs/heads/main/config.yaml
+
+# Edit with your node credentials
+nano config.yaml
+
+# Run
+docker run -d \
+  --name noderouter \
+  -p 5000:5000 \
+  -v $(pwd)/config.yaml:/app/config.yaml:ro \
+  --cpus="0.5" \
+  --memory="128m" \
+  ghcr.io/byakugan-1/noderouter:latest
+```
+
+---
+
+### Option 2: Build Locally
+
+Clone the repository and build the image yourself.
+
+#### Using Docker Compose
+
+```bash
+# Clone the repository
+git clone https://github.com/byakugan-1/NodeRouter && cd NodeRouter
+
+# Edit configuration
+nano config.yaml
+
+# Build and start
+docker compose up -d --build
+
+# Or download the sample config if you don't have it:
+# curl -O https://raw.githubusercontent.com/byakugan-1/NodeRouter/main/config.yaml
+
+# View logs
+docker compose logs -f
+```
+
+#### Using Docker Build
+
+```bash
+# Clone and build
+git clone https://github.com/byakugan-1/NodeRouter && cd NodeRouter
 docker build -t noderouter:latest .
 
-# Run with bridge networking
+# Run (config.yaml is already in the repo)
 docker run -d \
   --name noderouter \
   -p 5000:5000 \
@@ -70,7 +148,11 @@ docker run -d \
   noderouter:latest
 ```
 
-### Local Development
+---
+
+### Local Development (Go)
+
+Run directly without Docker for development or debugging.
 
 ```bash
 # Install Go dependencies
