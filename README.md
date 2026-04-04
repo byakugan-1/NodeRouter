@@ -89,12 +89,16 @@ The Go backend polls all enabled services concurrently on each refresh cycle. Bl
 ```bash
 # 1. Clone and configure
 git clone https://github.com/byakugan-1/NodeRouter && cd NodeRouter
-# Edit config.yaml with your node credentials
 
-# 2. Build and run
+
+# 2. Download the sample config.yaml and customize
+curl -O https://raw.githubusercontent.com/byakugan-1/NodeRouter/refs/heads/main/config.yaml
+
+
+# 3. Build and run
 docker compose up -d
 
-# 3. Access dashboard
+# 4. Access dashboard
 open http://localhost:5000
 ```
 
