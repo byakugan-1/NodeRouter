@@ -1,35 +1,117 @@
+# NodeRouter Configuration
+# ========================
+# Edit this file to configure your NodeRouter dashboard.
+# Changes are applied automatically without restart (hot-reload).
+
+# ------------------------------------------
+# GLOBAL SETTINGS
+# ------------------------------------------
+# How often (in seconds) the dashboard polls your nodes for updates.
+# Recommended: 10-30 seconds.
 global_refresh_interval: 10
+
+# Browser tab icon. Use a local name (e.g., "bitcoin") or a remote URL.
 favicon: bitcoin
+
+# Show latency badges (response time) next to each module's status.
 show_latency: true
+
+# ------------------------------------------
+# BITCOIN CORE (Required)
+# ------------------------------------------
+# NodeRouter requires Bitcoin Core as the foundation.
 bitcoin_core:
     enabled: true
-    rpc_address: http://192.168.0.211:8332
-    rpc_user: satoshi
-    rpc_password: satoshi
+    # RPC endpoint (include http:// or https:// and port)
+    rpc_address: "http://127.0.0.1:8332"
+    # RPC credentials from bitcoin.conf
+    rpc_user: "your_rpc_user"
+    rpc_password: "your_rpc_password"
+    # Public addresses for wallet pairing (optional)
     clearnet_address: ""
     tor_address: ""
+    # Optional URL to open when clicking module title
     title_link: ""
-    recent_blocks_count: 30
+    # Number of recent blocks to display (6-30)
+    recent_blocks_count: 15
+
+# ------------------------------------------
+# MEMPOOL SPACE (Optional)
+# ------------------------------------------
 mempool:
-    enabled: true
-    api_endpoint: http://192.168.0.211:4080
-    title_link: ""
+    enabled: false
+    # Mempool API URL (do not include /api)
+    api_endpoint: "http://127.0.0.1:4080"
+    # Enable sub-sat fee precision (0.1 sat/vB floor)
     subsat: true
+    # Optional URL to open when clicking module title
+    title_link: ""
+
+# ------------------------------------------
+# FULCRUM (Optional)
+# ------------------------------------------
 fulcrum:
-    enabled: true
-    rpc_address: 192.168.0.211
+    enabled: false
+    # Fulcrum server IP/hostname
+    rpc_address: "127.0.0.1"
+    # Fulcrum TCP/SSL port (50001 TCP, 50002 SSL)
     rpc_port: 50001
+    # Use SSL connection
     ssl_enabled: false
+    # Public addresses for Electrum wallet pairing (optional)
     clearnet_address: ""
     tor_address: ""
+    # Optional URL to open when clicking module title
     title_link: ""
+
+# ------------------------------------------
+# MONERO (Optional)
+# ------------------------------------------
 monero:
-    enabled: true
-    rpc_address: http://192.168.0.211:18089
+    enabled: false
+    # Monero RPC endpoint (include http:// or https:// and port)
+    rpc_address: "http://127.0.0.1:18081"
+    # Optional URL to open when clicking module title
     title_link: ""
-    recent_blocks_count: 30
+    # Number of recent blocks to display (6-30)
+    recent_blocks_count: 15
+
+# ------------------------------------------
+# NOTIFICATIONS (Optional)
+# ------------------------------------------
+# Push notifications via Gotify for fee alerts, new blocks, TX confirmations.
 notifications:
-    gotify_url: http://truenas.local:4040/
-    gotify_token: AdvkEOWFAjiRzyU
-    enabled: true
+    # Gotify server URL
+    gotify_url: ""
+    # Gotify app token
+    gotify_token: ""
+    # Enable notifications
+    enabled: false
+    # How often (seconds) to check notification conditions (10-300)
     check_freq: 60
+
+# ------------------------------------------
+# AUTHENTICATION (Optional)
+# ------------------------------------------
+# Protect your dashboard with password and/or Auth47 (BIP47 payment code).
+# Set mode to "none" to disable authentication.
+auth:
+    # Authentication mode: "none" | "password" | "auth47" | "both"
+    mode: "none"
+    # Plaintext password - auto-hashed on first startup, then cleared
+    password: ""
+    # bcrypt hash - auto-generated, do not edit manually
+    password_hash: ""
+    # BIP47 payment code for Auth47 login (e.g., PM8T...)
+    admin_payment_code: ""
+    # Session expiry in hours (default: 24)
+    session_expiry: 24
+
+# ------------------------------------------
+# TOR HIDDEN SERVICE (Optional)
+# ------------------------------------------
+# Enable Tor for anonymous access and Auth47 authentication.
+# When enabled, a .onion address is auto-generated and persisted
+# in the ./tor-data/ directory across restarts.
+tor:
+    enabled: false

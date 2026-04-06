@@ -59,6 +59,17 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
   box-shadow:0 0 6px rgba(255,255,255,.3);
   will-change:width;
 }
+.tor-link{
+  display:flex;align-items:center;gap:6px;
+  margin-top:4px;font-size:.7rem;color:var(--text3);
+  text-decoration:none;transition:color .15s;
+}
+.tor-link:hover{color:var(--text)}
+.tor-link svg{flex-shrink:0}
+.tor-hostname{
+  font-family:var(--mono);max-width:200px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
 
 /* ---- DASHBOARD ---- */
 .dashboard{

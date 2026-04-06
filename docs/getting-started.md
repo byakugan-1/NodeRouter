@@ -242,6 +242,69 @@ Edit `config.yaml` to match your node setup. Changes apply automatically without
 
 > **Remote connections:** Use `https://` for encrypted connections to remote nodes. Self-signed certificates are accepted.
 
+### Authentication
+
+NodeRouter supports optional authentication to protect your dashboard. By default, authentication is disabled (`mode: "none"`).
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `mode` | string | `"none"` | Authentication mode: `"none"`, `"password"`, `"auth47"`, or `"both"` |
+| `password` | string | `""` | Your plaintext password (auto-hashed on first startup) |
+| `password_hash` | string | `""` | bcrypt hash (auto-generated, do not edit manually) |
+| `admin_payment_code` | string | `""` | Single BIP47 payment code allowed for Auth47 login (e.g., `PM8T...`) |
+| `session_expiry` | int | `24` | Session expiry in hours |
+
+#### Password Authentication
+
+1. Set `mode: "password"` in the auth section
+2. Set `password` to your desired password
+3. On first startup, NodeRouter will hash the password and clear the plaintext from config
+
+> **Note:** The plaintext password is only used once to generate the bcrypt hash. After hashing, the `password` field is cleared and the hash is stored in `password_hash`. To change the password, set a new value in `password` and restart.
+
+#### Auth47 Authentication
+
+1. Set `mode: "auth47"` in the auth section
+2. Set `admin_payment_code` to your BIP47 payment code
+3. Login by scanning the QR code with a compatible wallet (Samourai, Sparrow, Ashigaru)
+
+> **Note:** Auth47 requires Tor to be enabled (`tor.enabled: true`). The callback URL uses the .onion address.
+
+#### Session Management
+
+- Sessions expire after `session_expiry` hours (default: 24)
+- Sessions are stored in memory only — cleared on container restart
+- Rate limiting: 5 password attempts per 60 seconds per IP
+
+#### Example Configuration
+
+```yaml
+auth:
+    mode: "both"
+    password: "my_secure_password"
+    admin_payment_code: "PM8T..."
+    session_expiry: 48
+```
+
+### Tor Hidden Service
+
+NodeRouter includes built-in Tor support for anonymous access and Auth47 authentication.
+
+#### How It Works
+
+1. On startup, Tor generates a hidden service (.onion address)
+2. The .onion address is saved to `./tor-data/` (persistent across restarts)
+3. Auth47 callback URL uses the .onion address
+
+#### Disabling Tor
+
+Set `tor.enabled: false` to disable. Note: Auth47 will also be disabled when Tor is off.
+
+```yaml
+tor:
+    enabled: false
+```
+
 ---
 
 ## Docker Deployment
@@ -258,7 +321,7 @@ ports:
 
 Access dashboard at `http://localhost:5000`
 
-### Host Networking (Remote Nodes)
+### Host Networking (Remote Node Might need this)
 
 Use when connecting to nodes on other machines/networks.
 

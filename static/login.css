@@ -1,0 +1,491 @@
+/* ==========================================
+   NodeRouter - Login Page Styles
+   ========================================== */
+
+.login-body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background: var(--bg);
+  padding: 20px;
+}
+
+.login-container {
+  width: 100%;
+  max-width: 420px;
+}
+
+.login-card {
+  background: var(--card);
+  backdrop-filter: var(--glass);
+  -webkit-backdrop-filter: var(--glass);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 32px 24px;
+  animation: loginFadeIn 0.4s var(--ease) both;
+}
+
+@keyframes loginFadeIn {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.login-header {
+  text-align: center;
+  margin-bottom: 24px;
+}
+
+.logo-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.login-logo {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--bg2);
+  padding: 6px;
+}
+
+.paynym-avatar {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--bg2);
+  padding: 6px;
+  filter: grayscale(100%);
+  opacity: 0.6;
+  transition: all 0.2s var(--ease);
+  cursor: default;
+}
+
+.paynym-avatar:hover {
+  filter: grayscale(0%);
+  opacity: 1;
+  transform: scale(1.1);
+}
+
+.login-header h1 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 0 0 4px 0;
+}
+
+.login-subtitle {
+  font-size: 0.85rem;
+  color: var(--text2);
+  margin: 0;
+}
+
+/* Tabs */
+.login-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 20px;
+  background: rgba(255,255,255,0.04);
+  border-radius: var(--radius-sm);
+  padding: 4px;
+}
+
+.login-tab {
+  flex: 1;
+  padding: 8px 16px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--text2);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s var(--ease);
+}
+
+.login-tab:hover {
+  color: var(--text);
+}
+
+.login-tab.active {
+  background: rgba(255,255,255,0.1);
+  color: var(--text);
+}
+
+/* Panels */
+.login-panel {
+  display: none;
+}
+
+.login-panel.active {
+  display: block;
+}
+
+/* Password Form */
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.login-field label {
+  display: block;
+  font-size: 0.7rem;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.password-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.password-input-wrap input[type="password"],
+.password-input-wrap input[type="text"] {
+  flex: 1;
+  padding: 12px 56px 12px 14px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 0.95rem;
+  font-family: var(--sans);
+  transition: border-color 0.2s var(--ease);
+  box-sizing: border-box;
+}
+
+.password-input-wrap input:focus {
+  outline: none;
+  border-color: var(--blue);
+  background: rgba(255,255,255,0.08);
+}
+
+/* Password toggle - Apple style, inside textbox */
+.password-toggle {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.password-toggle .apple-toggle {
+  width: 44px;
+  height: 24px;
+  margin: 0;
+}
+
+.password-toggle .toggle-slider {
+  border-radius: 24px;
+}
+
+.password-toggle .toggle-slider::before {
+  height: 20px;
+  width: 20px;
+  left: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  bottom: auto;
+  transition: transform 0.2s var(--ease);
+}
+
+.password-toggle input:checked + .toggle-slider::before {
+  transform: translateX(20px) translateY(-50%);
+}
+
+.login-btn {
+  width: 100%;
+  padding: 12px 16px;
+  background: var(--blue);
+  border: none;
+  border-radius: var(--radius-sm);
+  color: #fff;
+  font-size: 0.95rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.2s var(--ease);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.login-btn:hover {
+  background: #0070e0;
+}
+
+.login-btn:active {
+  transform: scale(0.98);
+}
+
+.login-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255,255,255,0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.hidden {
+  display: none;
+}
+
+.login-message {
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+  font-family: var(--mono);
+  display: none;
+}
+
+.login-message.success {
+  display: block;
+  background: rgba(48,209,88,0.1);
+  color: var(--green);
+  border: 1px solid rgba(48,209,88,0.3);
+}
+
+.login-message.error {
+  display: block;
+  background: rgba(255,69,58,0.1);
+  color: var(--red);
+  border: 1px solid rgba(255,69,58,0.3);
+}
+
+/* Auth47 Panel */
+.auth47-content {
+  text-align: center;
+}
+
+.qr-container {
+  margin-bottom: 16px;
+  min-height: 280px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.qr-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  color: var(--text2);
+}
+
+.qr-loading .spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid rgba(255,255,255,0.1);
+  border-top-color: var(--blue);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.qr-loading p {
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+.qr-image {
+  max-width: 256px;
+  border-radius: var(--radius-sm);
+  background: #fff;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.auth47-uri-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  max-width: 320px;
+}
+
+.auth47-uri-input {
+  flex: 1;
+  padding: 8px 12px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text2);
+  font-size: 0.7rem;
+  font-family: var(--mono);
+  text-overflow: ellipsis;
+}
+
+.auth47-uri-input:focus {
+  outline: none;
+  border-color: var(--blue);
+}
+
+.copy-uri-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text2);
+  cursor: pointer;
+  transition: all 0.2s var(--ease);
+  flex-shrink: 0;
+}
+
+.copy-uri-btn:hover {
+  background: rgba(255,255,255,0.1);
+  color: var(--text);
+}
+
+.copy-uri-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+.copy-uri-btn.copied {
+  color: var(--green);
+  border-color: rgba(48,209,88,0.3);
+}
+
+.auth47-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px;
+  margin-bottom: 20px;
+  background: rgba(255,255,255,0.04);
+  border-radius: var(--radius-sm);
+}
+
+.auth47-status .status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text3);
+}
+
+.auth47-status.pending .status-dot {
+  background: var(--yellow);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.auth47-status.verified .status-dot {
+  background: var(--green);
+  box-shadow: 0 0 6px rgba(48,209,88,0.5);
+}
+
+.auth47-status.error .status-dot {
+  background: var(--red);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.auth47-status .status-text {
+  font-size: 0.85rem;
+  color: var(--text2);
+}
+
+/* Supported Wallets */
+.supported-wallets {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+
+.supported-title {
+  font-size: 0.7rem;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 700;
+  margin-bottom: 12px;
+}
+
+.wallet-logos {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.wallet-logos a {
+  display: block;
+  transition: transform 0.2s var(--ease);
+}
+
+.wallet-logos a:hover {
+  transform: scale(1.1);
+}
+
+.wallet-logos img {
+  height: 36px;
+  width: auto;
+  filter: grayscale(100%);
+  opacity: 0.6;
+  transition: all 0.2s var(--ease);
+}
+
+.wallet-logos a:hover img {
+  filter: grayscale(0%);
+  opacity: 1;
+}
+
+/* Responsive */
+@media (max-width: 480px) {
+  .login-card {
+    padding: 24px 16px;
+  }
+
+  .login-header h1 {
+    font-size: 1.3rem;
+  }
+
+  .login-logo {
+    width: 56px;
+    height: 56px;
+  }
+
+  .wallet-logos {
+    gap: 12px;
+  }
+
+  .wallet-logos img {
+    height: 30px;
+  }
+
+  .auth47-uri-wrap {
+    flex-direction: column;
+  }
+
+  .copy-uri-btn {
+    width: 100%;
+  }
+}

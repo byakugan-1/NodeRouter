@@ -1,24 +1,6 @@
 # ==========================================
 # NodeRouter Docker Compose
 # ==========================================
-# Quick Start: docker compose up -d
-#
-# NETWORKING OPTIONS:
-#
-# Option 1: Bridge Mode (Default)
-#   - Container has its own IP address on Docker's internal network
-#   - Access dashboard at: http://localhost:5000
-#   - Use when your nodes are accessible from the container network
-#
-# Option 2: Host Networking (Recommended for remote nodes)
-#   - Container shares the host's full network stack
-#   - Required when connecting to nodes on other machines/networks
-#   - To enable: Uncomment "network_mode: host" below
-#     AND comment out the entire "ports:" section
-#   - Dashboard will be at http://<HOST_IP>:5000
-#
-# ==========================================
-
 services:
   noderouter:
     build:
@@ -26,49 +8,15 @@ services:
       dockerfile: Dockerfile
     image: noderouter:latest
     container_name: noderouter
-
-    # ------------------------------------------
-    # ENVIRONMENT VARIABLES
-    # ------------------------------------------
     environment:
-      # Internal port the Flask server listens on.
-      # Change this if port 5000 conflicts with another service.
       - NODEROUTER_PORT=5000
-      # Path to config inside the container (usually no need to change)
-      # - NODEROUTER_CONFIG=/app/config.yaml
-
-    # ------------------------------------------
-    # NETWORKING: Choose ONE option below
-    # ------------------------------------------
-
-    # OPTION 1: Bridge Mode (Default)
-    # Maps container port to host port.
-    # If you changed NODEROUTER_PORT above, update the right side too.
-    # Format: "HOST_PORT:CONTAINER_PORT"
     ports:
       - "5000:5000"
-
-    # OPTION 2: Host Networking
-    # Uncomment the line below AND comment out the "ports:" block above.
-    # The container will use the host's network directly.
-    # No port mapping needed — the app listens on the host's port.
-    # network_mode: host
-
-    # ------------------------------------------
-    # CONFIGURATION VOLUME
-    # ------------------------------------------
-    # Mount your config file (read-write so settings can be saved)
+      - "9050:9050"
     volumes:
       - ./config.yaml:/app/config.yaml
-
-    # ------------------------------------------
-    # RESTART POLICY
-    # ------------------------------------------
+      - ./tor-data:/var/lib/tor/noderouter
     restart: unless-stopped
-
-    # ------------------------------------------
-    # LOGGING
-    # ------------------------------------------
     logging:
       driver: "json-file"
       options:

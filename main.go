@@ -2,9 +2,11 @@ package main
 
 import (
 	"bufio"
+	"crypto/rand"
 	"crypto/tls"
 	"embed"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -23,6 +25,8 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/golang-jwt/jwt/v5"
+	"golang.org/x/crypto/bcrypt"
 	qrcode "github.com/skip2/go-qrcode"
 	"gopkg.in/yaml.v3"
 )
@@ -41,6 +45,20 @@ type Config struct {
 	Fulcrum               FulcrumCfg `yaml:"fulcrum"`
 	Monero                MoneroCfg  `yaml:"monero"`
 	Notifications         NotifCfg   `yaml:"notifications"`
+	Auth                  AuthCfg    `yaml:"auth"`
+	Tor                   TorCfg     `yaml:"tor"`
+}
+
+type AuthCfg struct {
+	Mode             string `yaml:"mode"`               // "none" | "password" | "auth47" | "both"
+	Password         string `yaml:"password"`           // Plaintext password (hashed on first load)
+	PasswordHash     string `yaml:"password_hash"`      // bcrypt hash (auto-generated)
+	AdminPaymentCode string `yaml:"admin_payment_code"` // Single allowed BIP47 payment code
+	SessionExpiry    int    `yaml:"session_expiry"`     // Session expiry in hours (default 24)
+}
+
+type TorCfg struct {
+	Enabled bool `yaml:"enabled"` // Enable Tor hidden service
 }
 
 type NotifCfg struct {
@@ -190,11 +208,40 @@ func loadConfig() error {
 	if c.Monero.RecentBlocksCount > 30 {
 		c.Monero.RecentBlocksCount = 30
 	}
+	// Validate auth mode
+	validAuthModes := map[string]bool{"": true, "none": true, "password": true, "auth47": true, "both": true}
+	if !validAuthModes[c.Auth.Mode] {
+		c.Auth.Mode = "none"
+	}
+	// If Tor is disabled, override auth47 to disabled
+	if !c.Tor.Enabled && (c.Auth.Mode == "auth47" || c.Auth.Mode == "both") {
+		if c.Auth.Mode == "both" {
+			c.Auth.Mode = "password"
+			log.Println("[Config] Tor disabled: Auth47 disabled, falling back to password-only auth")
+		} else {
+			c.Auth.Mode = "none"
+			log.Println("[Config] Tor disabled: Auth47 disabled, no authentication enabled")
+		}
+	}
+	// Auto-hash plaintext password if provided
+	if c.Auth.Password != "" && c.Auth.PasswordHash == "" {
+		hash, err := bcrypt.GenerateFromPassword([]byte(c.Auth.Password), bcrypt.DefaultCost)
+		if err != nil {
+			log.Printf("[Auth] Failed to hash password: %v", err)
+		} else {
+			c.Auth.PasswordHash = string(hash)
+			c.Auth.Password = "" // Clear plaintext
+			// Write back to config
+			data, _ := yaml.Marshal(c)
+			os.WriteFile(cfgPath, data, 0644)
+			log.Println("[Auth] Password hashed and saved to config")
+		}
+	}
 	cfgMu.Lock()
 	cfg = c
 	faviconVer = time.Now().Unix() // increment version for cache-busting
 	cfgMu.Unlock()
-	log.Printf("[Config] Loaded from %s (interval: %ds)", cfgPath, c.GlobalRefreshInterval)
+	log.Printf("[Config] Loaded from %s (interval: %ds, auth: %s, tor: %v)", cfgPath, c.GlobalRefreshInterval, c.Auth.Mode, c.Tor.Enabled)
 	return nil
 }
 
@@ -507,6 +554,7 @@ type DashboardData struct {
 	ShowLatency   bool               `json:"show_latency"`
 	NotifEnabled  bool               `json:"notif_enabled"`
 	RefreshStart  int64              `json:"refresh_start"`
+	TorHostname   string             `json:"tor_hostname"`
 }
 
 // ==================== State ====================
@@ -522,7 +570,60 @@ var (
 	// Monero block cache
 	xmrBlockCache   = make(map[int]BlockInfo)
 	xmrBlockCacheMu sync.RWMutex
+	// Auth session store
+	authSessions   = make(map[string]*Session)
+	authSessionsMu sync.RWMutex
+	// Auth47 pending authentications
+	auth47Pending   = make(map[string]*Auth47Pending)
+	auth47PendingMu sync.RWMutex
+	// JWT secret (generated on startup)
+	jwtSecret []byte
+	// Tor hostname (populated at startup)
+	torHostname string
+	torHostnameMu sync.RWMutex
+	// Rate limiting for auth endpoints
+	authRateLimit   = make(map[string]int64)
+	authRateLimitMu sync.RWMutex
 )
+
+// Session represents an authenticated user session
+type Session struct {
+	LoggedIn   bool      `json:"logged_in"`
+	AuthMethod string    `json:"auth_method"` // "password" | "auth47"
+	Paynym     string    `json:"paynym,omitempty"`
+	PaynymName string    `json:"paynym_name,omitempty"`
+	PaynymAvatar string  `json:"paynym_avatar,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+	ExpiresAt  time.Time `json:"expires_at"`
+}
+
+// Auth47Pending tracks pending Auth47 authentication
+type Auth47Pending struct {
+	Nonce     string
+	CreatedAt time.Time
+	Verified  bool
+	Paynym    string
+}
+
+// Auth47URI response
+type Auth47URIResponse struct {
+	Nonce       string `json:"nonce"`
+	URI         string `json:"uri"`
+	PaymentCode string `json:"payment_code,omitempty"`
+	Expires     int64  `json:"expires"`
+}
+
+// LoginRequest for password authentication
+type LoginRequest struct {
+	Password string `json:"password"`
+}
+
+// LoginResponse
+type LoginResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message,omitempty"`
+	Token   string `json:"token,omitempty"`
+}
 
 // ==================== Polling ====================
 
@@ -630,6 +731,7 @@ func pollAll() {
 		ShowLatency:   c.ShowLatency,
 		NotifEnabled:  c.Notifications.Enabled && c.Notifications.GotifyURL != "" && c.Notifications.GotifyToken != "",
 		RefreshStart:  refreshStart,
+		TorHostname:   getTorHostname(),
 	}
 	lastSuccess = now
 	dataMu.Unlock()
@@ -1522,9 +1624,580 @@ func mempoolClass(pct float64) string {
 	return "sync-high" // green
 }
 
+// ==================== Authentication ====================
+
+// generateJWTSecret creates a random 32-byte secret for JWT signing
+func generateJWTSecret() []byte {
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		log.Fatalf("[Auth] Failed to generate JWT secret: %v", err)
+	}
+	return secret
+}
+
+// generateSessionID creates a random session ID
+func generateSessionID() string {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(b)
+}
+
+// createSession creates a new authenticated session
+func createSession(authMethod, paynym, paynymName, paynymAvatar string) (*Session, string) {
+	sessionID := generateSessionID()
+	// Get session expiry from config (default 24 hours)
+	c := getConfig()
+	expiryHours := c.Auth.SessionExpiry
+	if expiryHours <= 0 {
+		expiryHours = 24
+	}
+	session := &Session{
+		LoggedIn:     true,
+		AuthMethod:   authMethod,
+		Paynym:       paynym,
+		PaynymName:   paynymName,
+		PaynymAvatar: paynymAvatar,
+		CreatedAt:    time.Now(),
+		ExpiresAt:    time.Now().Add(time.Duration(expiryHours) * time.Hour),
+	}
+	authSessionsMu.Lock()
+	authSessions[sessionID] = session
+	authSessionsMu.Unlock()
+	return session, sessionID
+}
+
+// getSession retrieves a session by ID
+func getSession(sessionID string) *Session {
+	authSessionsMu.RLock()
+	defer authSessionsMu.RUnlock()
+	session, exists := authSessions[sessionID]
+	if !exists {
+		return nil
+	}
+	if time.Now().After(session.ExpiresAt) {
+		return nil
+	}
+	return session
+}
+
+// deleteSession removes a session
+func deleteSession(sessionID string) {
+	authSessionsMu.Lock()
+	delete(authSessions, sessionID)
+	authSessionsMu.Unlock()
+}
+
+// generateJWTToken creates a JWT token for a session
+func generateJWTToken(sessionID string) (string, error) {
+	claims := jwt.MapClaims{
+		"session_id": sessionID,
+		"exp":        time.Now().Add(24 * time.Hour).Unix(),
+		"iat":        time.Now().Unix(),
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString(jwtSecret)
+}
+
+// verifyJWTToken validates a JWT token and returns the session ID
+func verifyJWTToken(tokenString string) (string, error) {
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		return jwtSecret, nil
+	})
+	if err != nil {
+		return "", err
+	}
+	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
+		if sessionID, ok := claims["session_id"].(string); ok {
+			return sessionID, nil
+		}
+	}
+	return "", fmt.Errorf("invalid token")
+}
+
+// authMiddleware checks if user is authenticated
+func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		c := getConfig()
+		// If auth mode is "none", skip authentication
+		if c.Auth.Mode == "" || c.Auth.Mode == "none" {
+			next(w, r)
+			return
+		}
+
+		// Get session cookie
+		cookie, err := r.Cookie("noderouter_session")
+		if err != nil {
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			return
+		}
+
+		// Verify JWT token
+		sessionID, err := verifyJWTToken(cookie.Value)
+		if err != nil {
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			return
+		}
+
+		// Check session exists and is valid
+		session := getSession(sessionID)
+		if session == nil || !session.LoggedIn {
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			return
+		}
+
+		// Security: Set security headers
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("X-XSS-Protection", "1; mode=block")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+
+		next(w, r)
+	}
+}
+
+// handleLoginPage serves the login page
+func handleLoginPage(w http.ResponseWriter, r *http.Request) {
+	c := getConfig()
+	// If auth is disabled, redirect to dashboard
+	if c.Auth.Mode == "" || c.Auth.Mode == "none" {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+	// Security headers for login page
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("X-Frame-Options", "DENY")
+	w.Header().Set("X-XSS-Protection", "1; mode=block")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	if err := loginTpl.Execute(w, map[string]interface{}{
+		"AuthMode": c.Auth.Mode,
+	}); err != nil {
+		log.Printf("[HTTP] Login template error: %v", err)
+		http.Error(w, "Template error", 500)
+	}
+}
+
+// checkRateLimit returns true if the IP has exceeded the rate limit
+func checkRateLimit(ip string, maxRequests int64, windowSeconds int64) bool {
+	now := time.Now().Unix()
+	authRateLimitMu.Lock()
+	defer authRateLimitMu.Unlock()
+	
+	lastTime, exists := authRateLimit[ip]
+	if !exists || now-lastTime > windowSeconds {
+		authRateLimit[ip] = now
+		return false
+	}
+	
+	// Count requests in window
+	count := int64(0)
+	for _, t := range authRateLimit {
+		if now-t < windowSeconds {
+			count++
+		}
+	}
+	
+	if count >= maxRequests {
+		return true
+	}
+	
+	authRateLimit[ip] = now
+	return false
+}
+
+// getClientIP extracts the client IP from the request
+func getClientIP(r *http.Request) string {
+	// Check X-Forwarded-For header first (for proxies)
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.Split(xff, ",")
+		return strings.TrimSpace(parts[0])
+	}
+	// Check X-Real-IP header
+	if xri := r.Header.Get("X-Real-IP"); xri != "" {
+		return xri
+	}
+	// Fall back to RemoteAddr
+	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
+	if ip == "" {
+		return r.RemoteAddr
+	}
+	return ip
+}
+
+// handlePasswordLogin processes password-based login
+func handlePasswordLogin(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	
+	// Rate limiting: 5 attempts per 60 seconds per IP
+	clientIP := getClientIP(r)
+	if checkRateLimit(clientIP, 5, 60) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		w.Write([]byte(`{"success":false,"message":"Too many attempts, please try again later"}`))
+		return
+	}
+	
+	c := getConfig()
+
+	if c.Auth.Mode != "password" && c.Auth.Mode != "both" {
+		w.Write([]byte(`{"success":false,"message":"Password auth not enabled"}`))
+		return
+	}
+
+	var req LoginRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.Write([]byte(`{"success":false,"message":"Invalid JSON"}`))
+		return
+	}
+
+	if req.Password == "" {
+		w.Write([]byte(`{"success":false,"message":"Password required"}`))
+		return
+	}
+
+	// Verify password against bcrypt hash
+	if c.Auth.PasswordHash == "" {
+		w.Write([]byte(`{"success":false,"message":"No password configured"}`))
+		return
+	}
+
+	err := bcrypt.CompareHashAndPassword([]byte(c.Auth.PasswordHash), []byte(req.Password))
+	if err != nil {
+		w.Write([]byte(`{"success":false,"message":"Invalid password"}`))
+		return
+	}
+
+	// Create session
+	session, sessionID := createSession("password", "", "", "")
+	token, err := generateJWTToken(sessionID)
+	if err != nil {
+		w.Write([]byte(`{"success":false,"message":"Failed to create session"}`))
+		return
+	}
+
+	// Set cookie
+	http.SetCookie(w, &http.Cookie{
+		Name:     "noderouter_session",
+		Value:    token,
+		Path:     "/",
+		Expires:  session.ExpiresAt,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   false, // Allow over http for Tor hidden service
+	})
+
+	log.Printf("[Auth] Password login successful from %s", clientIP)
+	w.Write([]byte(fmt.Sprintf(`{"success":true,"token":"%s"}`, token)))
+}
+
+// handleAuth47URI generates an Auth47 challenge URI
+func handleAuth47URI(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	c := getConfig()
+
+	if c.Auth.Mode != "auth47" && c.Auth.Mode != "both" {
+		w.Write([]byte(`{"success":false,"message":"Auth47 not enabled"}`))
+		return
+	}
+
+	if c.Auth.AdminPaymentCode == "" {
+		w.Write([]byte(`{"success":false,"message":"No admin payment code configured"}`))
+		return
+	}
+
+	// Generate nonce
+	nonceBytes := make([]byte, 16)
+	if _, err := rand.Read(nonceBytes); err != nil {
+		w.Write([]byte(`{"success":false,"message":"Failed to generate nonce"}`))
+		return
+	}
+	nonce := hex.EncodeToString(nonceBytes)
+
+	// Calculate expiry (10 minutes from now)
+	expiry := time.Now().Add(10 * time.Minute).Unix()
+
+	// Build Auth47 URI - prefer Tor hostname if available
+	callbackHost := getTorHostname()
+	scheme := "http"
+	if callbackHost == "" {
+		// Fallback to request host
+		if r.TLS != nil {
+			scheme = "https"
+		}
+		callbackHost = r.Host
+	}
+	// Ensure .onion uses http scheme
+	if strings.HasSuffix(callbackHost, ".onion") {
+		scheme = "http"
+	}
+	callbackURL := fmt.Sprintf("%s://%s/auth/auth47/callback", scheme, callbackHost)
+	uri := fmt.Sprintf("auth47://%s?c=%s&e=%d&r=%s", nonce, callbackURL, expiry, callbackURL)
+
+	// Store pending auth
+	auth47PendingMu.Lock()
+	auth47Pending[nonce] = &Auth47Pending{
+		Nonce:     nonce,
+		CreatedAt: time.Now(),
+		Verified:  false,
+	}
+	auth47PendingMu.Unlock()
+
+	log.Printf("[Auth47] Generated URI for nonce: %s", nonce)
+	w.Write([]byte(fmt.Sprintf(`{"success":true,"nonce":"%s","uri":"%s","payment_code":"%s","expires":%d}`,
+		nonce, uri, c.Auth.AdminPaymentCode, expiry)))
+}
+
+// handleAuth47Callback processes Auth47 wallet callback
+func handleAuth47Callback(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	c := getConfig()
+
+	var proof struct {
+		Challenge string `json:"challenge"`
+		Nym       string `json:"nym"`
+		Signature string `json:"signature"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&proof); err != nil {
+		w.Write([]byte(`{"success":false,"message":"Invalid JSON"}`))
+		return
+	}
+
+	if proof.Challenge == "" || proof.Nym == "" || proof.Signature == "" {
+		w.Write([]byte(`{"success":false,"message":"Missing required fields"}`))
+		return
+	}
+
+	// Verify payment code matches configured one
+	if proof.Nym != c.Auth.AdminPaymentCode {
+		w.Write([]byte(`{"success":false,"message":"Payment code not authorized"}`))
+		return
+	}
+
+	// Extract nonce from challenge URL
+	challengeURL, err := url.Parse(proof.Challenge)
+	if err != nil {
+		w.Write([]byte(`{"success":false,"message":"Invalid challenge URL"}`))
+		return
+	}
+	nonce := challengeURL.Hostname()
+	if nonce == "" {
+		// Try path for format like //nonce?...
+		nonce = strings.TrimPrefix(challengeURL.Path, "/")
+		nonce = strings.Split(nonce, "?")[0]
+	}
+
+	// Check nonce exists
+	auth47PendingMu.Lock()
+	pending, exists := auth47Pending[nonce]
+	if !exists {
+		auth47PendingMu.Unlock()
+		w.Write([]byte(`{"success":false,"message":"Invalid or expired nonce"}`))
+		return
+	}
+	if pending.Verified {
+		auth47PendingMu.Unlock()
+		w.Write([]byte(`{"success":false,"message":"Nonce already used"}`))
+		return
+	}
+	pending.Verified = true
+	pending.Paynym = proof.Nym
+	auth47PendingMu.Unlock()
+
+	log.Printf("[Auth47] Verification successful for %s", proof.Nym)
+
+	// Fetch Paynym avatar
+	avatarURL := fetchPaynymAvatar(proof.Nym)
+	paynymName := proof.Nym
+
+	// Try to get paynym name from paynym.rs
+	name, _ := fetchPaynymName(proof.Nym)
+	if name != "" {
+		paynymName = name
+	}
+
+	// Create session
+	session, sessionID := createSession("auth47", proof.Nym, paynymName, avatarURL)
+	token, err := generateJWTToken(sessionID)
+	if err != nil {
+		w.Write([]byte(`{"success":false,"message":"Failed to create session"}`))
+		return
+	}
+
+	// Set cookie
+	http.SetCookie(w, &http.Cookie{
+		Name:     "noderouter_session",
+		Value:    token,
+		Path:     "/",
+		Expires:  session.ExpiresAt,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   false, // Allow over http for Tor hidden service
+	})
+
+	w.Write([]byte(fmt.Sprintf(`{"success":true,"token":"%s","paynym":"%s","paynym_name":"%s","paynym_avatar":"%s"}`,
+		token, proof.Nym, paynymName, avatarURL)))
+}
+
+// handleAuth47Status polls auth status for a nonce
+func handleAuth47Status(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, private")
+
+	nonce := strings.TrimPrefix(r.URL.Path, "/auth/auth47/status/")
+	if nonce == "" {
+		w.Write([]byte(`{"status":"invalid"}`))
+		return
+	}
+
+	auth47PendingMu.RLock()
+	pending, exists := auth47Pending[nonce]
+	auth47PendingMu.RUnlock()
+
+	if !exists {
+		w.Write([]byte(`{"status":"invalid"}`))
+		return
+	}
+
+	if pending.Verified {
+		// Create session and set cookie when status is polled as verified
+		session, sessionID := createSession("auth47", pending.Paynym, "", "")
+		token, err := generateJWTToken(sessionID)
+		if err == nil {
+			http.SetCookie(w, &http.Cookie{
+				Name:     "noderouter_session",
+				Value:    token,
+				Path:     "/",
+				Expires:  session.ExpiresAt,
+				HttpOnly: true,
+				SameSite: http.SameSiteLaxMode,
+				Secure:   false,
+			})
+		}
+		w.Write([]byte(`{"status":"verified","paynym":"` + pending.Paynym + `"}`))
+		// Clean up after a delay
+		go func() {
+			time.Sleep(5 * time.Second)
+			auth47PendingMu.Lock()
+			delete(auth47Pending, nonce)
+			auth47PendingMu.Unlock()
+		}()
+		return
+	}
+
+	w.Write([]byte(`{"status":"pending"}`))
+}
+
+// handleLogout processes logout
+func handleLogout(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	cookie, err := r.Cookie("noderouter_session")
+	if err == nil {
+		sessionID, err := verifyJWTToken(cookie.Value)
+		if err == nil {
+			deleteSession(sessionID)
+		}
+	}
+
+	// Clear cookie
+	http.SetCookie(w, &http.Cookie{
+		Name:     "noderouter_session",
+		Value:    "",
+		Path:     "/",
+		Expires:  time.Unix(0, 0),
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
+
+	w.Write([]byte(`{"success":true,"message":"Logged out"}`))
+}
+
+// fetchPaynymAvatar gets the avatar URL for a payment code
+func fetchPaynymAvatar(paymentCode string) string {
+	resp, err := http.Post("https://paynym.rs/api/v1/nym/", "application/json",
+		strings.NewReader(fmt.Sprintf(`{"nym":"%s"}`, paymentCode)))
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+
+	var data struct {
+		Codes []struct {
+			Code string `json:"code"`
+		} `json:"codes"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return ""
+	}
+	if len(data.Codes) > 0 && data.Codes[0].Code != "" {
+		return fmt.Sprintf("https://paynym.rs/%s/avatar", data.Codes[0].Code)
+	}
+	return ""
+}
+
+// fetchPaynymName gets the paynym name for a payment code
+func fetchPaynymName(paymentCode string) (string, error) {
+	resp, err := http.Post("https://paynym.rs/api/v1/nym/", "application/json",
+		strings.NewReader(fmt.Sprintf(`{"nym":"%s"}`, paymentCode)))
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	var data struct {
+		NymName string `json:"nymName"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return "", err
+	}
+	return data.NymName, nil
+}
+
+// ==================== Tor Hidden Service ====================
+
+// startTorHiddenService reads the hostname from Tor data directory if enabled
+func startTorHiddenService() {
+	cfg := getConfig()
+	if !cfg.Tor.Enabled {
+		log.Println("[Tor] Hidden service disabled in config")
+		return
+	}
+
+	torDataDir := "/var/lib/tor/noderouter"
+	hostnameFile := torDataDir + "/hostname"
+
+	// Wait for hostname file to be created (Tor is started by entrypoint.sh)
+	go func() {
+		for i := 0; i < 30; i++ {
+			time.Sleep(2 * time.Second)
+			hostname, err := os.ReadFile(hostnameFile)
+			if err == nil && len(hostname) > 0 {
+				hostnameStr := strings.TrimSpace(string(hostname))
+				torHostnameMu.Lock()
+				torHostname = hostnameStr
+				torHostnameMu.Unlock()
+				log.Printf("[Tor] Hidden service ready: %s", hostnameStr)
+				return
+			}
+		}
+		log.Println("[Tor] Timeout waiting for hostname")
+	}()
+}
+
+// getTorHostname returns the current Tor hidden service hostname
+func getTorHostname() string {
+	torHostnameMu.RLock()
+	defer torHostnameMu.RUnlock()
+	return torHostname
+}
+
 // ==================== Main ====================
 
 var tpl *template.Template
+var loginTpl *template.Template
 
 func main() {
 	flag.StringVar(&cfgPath, "config", "config.yaml", "Config path")
@@ -1547,7 +2220,17 @@ func main() {
 		log.Fatalf("[Main] Config error: %v", err)
 	}
 
+	// Initialize JWT secret
+	jwtSecret = generateJWTSecret()
+	log.Println("[Auth] JWT secret generated")
+
+	// Parse login template
+	loginTpl = template.Must(template.New("login.html").ParseFS(embeddedFiles, "templates/login.html"))
+
 	pollAll()
+
+	// Start Tor hidden service if enabled
+	startTorHiddenService()
 
 	sseHub = NewHub()
 	go sseHub.Run()
@@ -1720,7 +2403,27 @@ func main() {
 		w.Write(data)
 	})
 
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	// Onion-Location middleware - set header on all responses when Tor is ready
+	onionMiddleware := func(next http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			hostname := getTorHostname()
+			if hostname != "" {
+				w.Header().Set("Onion-Location", "http://"+hostname+r.URL.Path)
+			}
+			next(w, r)
+		}
+	}
+
+	// Auth routes (public)
+	http.HandleFunc("/login", onionMiddleware(handleLoginPage))
+	http.HandleFunc("/auth/login", onionMiddleware(handlePasswordLogin))
+	http.HandleFunc("/auth/auth47/uri", onionMiddleware(handleAuth47URI))
+	http.HandleFunc("/auth/auth47/callback", onionMiddleware(handleAuth47Callback))
+	http.HandleFunc("/auth/auth47/status/", onionMiddleware(handleAuth47Status))
+	http.HandleFunc("/auth/logout", onionMiddleware(handleLogout))
+
+	// Protected routes
+	http.HandleFunc("/", onionMiddleware(authMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		dataMu.RLock()
 		d := *dashData
 		dataMu.RUnlock()
@@ -1731,10 +2434,60 @@ func main() {
 			log.Printf("[HTTP] Template error: %v", err)
 			http.Error(w, "Template error", 500)
 		}
+	})))
+
+	http.HandleFunc("/sse/stream", onionMiddleware(authMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		sseHub.ServeHTTP(w, r)
+	})))
+	http.HandleFunc("/api/notifications", onionMiddleware(authMiddleware(handleNotificationsAPI)))
+
+	// Paynym avatar proxy (public for login page)
+	http.HandleFunc("/api/paynym/avatar", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		code := r.URL.Query().Get("code")
+		if code == "" {
+			w.Write([]byte(`{"error":"Missing code parameter"}`))
+			return
+		}
+		// Fetch from paynym.rs
+		resp, err := http.Post("https://paynym.rs/api/v1/nym/", "application/json",
+			strings.NewReader(fmt.Sprintf(`{"nym":"%s"}`, code)))
+		if err != nil {
+			w.Write([]byte(`{"error":"Failed to fetch paynym"}`))
+			return
+		}
+		defer resp.Body.Close()
+		var data struct {
+			Codes []struct {
+				Code string `json:"code"`
+			} `json:"codes"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+			w.Write([]byte(`{"error":"Invalid response"}`))
+			return
+		}
+		if len(data.Codes) > 0 && data.Codes[0].Code != "" {
+			w.Write([]byte(fmt.Sprintf(`{"avatar_url":"https://paynym.rs/%s/avatar"}`, data.Codes[0].Code)))
+		} else {
+			w.Write([]byte(`{"avatar_url":""}`))
+		}
 	})
 
-	http.HandleFunc("/sse/stream", sseHub.ServeHTTP)
-	http.HandleFunc("/api/notifications", handleNotificationsAPI)
+	// QR code generation endpoint (public for login page)
+	http.HandleFunc("/api/qr", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		text := r.URL.Query().Get("text")
+		if text == "" {
+			w.Write([]byte(`{"error":"Missing text parameter"}`))
+			return
+		}
+		png, err := qrcode.Encode(text, qrcode.Medium, 256)
+		if err != nil {
+			w.Write([]byte(fmt.Sprintf(`{"error":"%s"}`, err.Error())))
+			return
+		}
+		w.Write([]byte(fmt.Sprintf(`{"qr":"data:image/png;base64,%s"}`, base64.StdEncoding.EncodeToString(png))))
+	})
 
 	log.Printf("[Main] Server on 0.0.0.0:%s", *port)
 	log.Printf("[Main] Dashboard at http://localhost:%s", *port)

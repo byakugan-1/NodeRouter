@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0b0b0b">
+<title>NodeRouter - Login</title>
+<link rel="icon" type="image/svg+xml" href="/static/logos/bitcoin.svg">
+<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/login.css">
+</head>
+<body class="login-body">
+<div class="login-container">
+  <div class="login-card">
+    <div class="login-header">
+      <div class="logo-row">
+        <img src="/static/logos/bitcoin.svg" alt="" class="login-logo">
+        {{if or (eq .AuthMode "auth47") (eq .AuthMode "both")}}
+        <img id="paynymAvatar" class="paynym-avatar" alt="Paynym Avatar">
+        {{end}}
+      </div>
+      <h1>NodeRouter</h1>
+      <p class="login-subtitle">Authentication Required</p>
+    </div>
+
+    <div class="login-tabs">
+      {{if or (eq .AuthMode "password") (eq .AuthMode "both")}}
+      <button class="login-tab active" data-tab="password">Password</button>
+      {{end}}
+      {{if or (eq .AuthMode "auth47") (eq .AuthMode "both")}}
+      <button class="login-tab" data-tab="auth47">Auth47</button>
+      {{end}}
+    </div>
+
+    <!-- Password Login -->
+    {{if or (eq .AuthMode "password") (eq .AuthMode "both")}}
+    <div class="login-panel active" id="passwordPanel">
+      <form id="passwordForm" class="login-form">
+        <div class="login-field">
+          <label for="password">Password</label>
+          <div class="password-input-wrap">
+            <input type="password" id="password" name="password" placeholder="Enter your password" required autocomplete="current-password">
+            <label class="apple-toggle password-toggle">
+              <input type="checkbox" id="showPassword">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+        <button type="submit" class="login-btn" id="loginBtn">
+          <span class="btn-text">Login</span>
+          <span class="btn-spinner hidden"></span>
+        </button>
+        <div class="login-message" id="loginMessage"></div>
+      </form>
+    </div>
+    {{end}}
+
+    <!-- Auth47 Login -->
+    {{if or (eq .AuthMode "auth47") (eq .AuthMode "both")}}
+    <div class="login-panel" id="auth47Panel">
+      <div class="auth47-content">
+        <div class="qr-container" id="qrContainer">
+          <div class="qr-loading" id="qrLoading">
+            <div class="spinner"></div>
+            <p>Generating QR code...</p>
+          </div>
+          <img id="qrImage" class="qr-image" style="display:none" alt="Auth47 QR Code">
+          <div class="auth47-uri-wrap" id="auth47UriWrap" style="display:none">
+            <input type="text" id="auth47Uri" class="auth47-uri-input" readonly>
+            <button class="copy-uri-btn" id="copyUriBtn" title="Copy to clipboard">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="auth47-status" id="auth47Status">
+          <span class="status-dot"></span>
+          <span class="status-text">Waiting for scan...</span>
+        </div>
+        <div class="supported-wallets">
+          <p class="supported-title">Supported Wallets</p>
+          <div class="wallet-logos">
+            <a href="https://samouraiwallet.com" target="_blank" rel="noopener" title="Samourai Wallet">
+              <img src="/static/logos/samourai.png" alt="Samourai Wallet">
+            </a>
+            <a href="https://sparrowwallet.com" target="_blank" rel="noopener" title="Sparrow Wallet">
+              <img src="/static/logos/sparrow.png" alt="Sparrow Wallet">
+            </a>
+            <a href="https://ashigaru.rs" target="_blank" rel="noopener" title="Ashigaru">
+              <img src="/static/logos/Ashigaru.png" alt="Ashigaru">
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+    {{end}}
+  </div>
+</div>
+
+<script src="/static/login.js"></script>
+</body>
+</html>
