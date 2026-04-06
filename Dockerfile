@@ -14,6 +14,9 @@ COPY --from=builder /build/noderouter .
 COPY --from=builder /build/config.yaml .
 COPY --from=builder /build/templates/ ./templates/
 COPY --from=builder /build/static/ ./static/
+# Make config world-writable so any UID can write to it
+RUN chmod 666 /app/config.yaml
 EXPOSE 5000
+# Run as non-root but allow any UID to write config
 USER 1000:1000
 CMD ["./noderouter"]
