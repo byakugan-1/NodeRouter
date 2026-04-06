@@ -1,0 +1,13 @@
+# Tor data directory (contains private keys)
+tor-data/
+
+# Go binary
+noderouter
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

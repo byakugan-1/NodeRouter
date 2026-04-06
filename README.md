@@ -11,8 +11,10 @@
 - [Overview](#overview)
 - [Screenshots](#screenshots)
 - [Supported Modules](#supported-modules)
+- [Authentication](#authentication)
 - [Quick Start](#quick-start)
 - [Documentation](#documentation)
+- [Acknowledgments](#acknowledgments)
 - [License](#license)
 
 ---
@@ -27,7 +29,7 @@ NodeRouter is a unified monitoring dashboard for self-hosted Bitcoin and Monero 
 - **Mempool Space** — Shows real-time fee estimates across multiple confirmation tiers, BTC price, and difficulty epoch progress with estimated change percentage.
 - **Fulcrum** — Monitors Electrum server sync progress against Bitcoin Core's known headers, displaying version and sync status.
 - **Monero** — Presents node sync status, network difficulty, total transactions since genesis, database size, transaction pool size, and a recent blocks visualization.
-- **Gotify Notifications** — Push notifications for fee rate changes, mempool size alerts, new blocks, specific block heights, and TX confirmation tracking. Configured via the Settings modal in the footer.
+- **Gotify Notifications** — Push notifications for fee rate changes, mempool size alerts, new blocks, specific block heights, and TX confirmation tracking. Configured via the Settings panel.
 
 **How it works:**
 
@@ -85,6 +87,29 @@ The Go backend polls all enabled services concurrently on each refresh cycle. Bl
 
 ---
 
+## Authentication
+
+NodeRouter supports two authentication methods to protect your dashboard:
+
+### Password Authentication
+- Set a password in `config.yaml` — it's auto-hashed with bcrypt on first startup
+- Login with username/password on the login page
+
+### Auth47
+- Authenticate using your BIP47 payment code via QR code scan
+- Compatible wallets: [Samourai Wallet](https://samouraiwallet.com), [Sparrow Wallet](https://sparrowwallet.com), [Ashigaru](https://ashigaru.rs)
+
+### Session Management
+- Sessions expire after configurable hours (default: 24)
+- Set `auth.session_expiry` in config to customize
+
+### Tor Hidden Service
+- Built-in Tor support for anonymous access and auth47 use
+- Auto-generates .onion address on startup
+- Set `tor.enabled: false` to disable (also disables Auth47)
+
+---
+
 ## Quick Start
 
 ```bash
@@ -115,6 +140,7 @@ Comprehensive setup guide covering configuration, Docker deployment, networking 
 
 - [Installation](docs/getting-started.md#installation)
 - [Configuration](docs/getting-started.md#configuration)
+- [Authentication](docs/getting-started.md#authentication)
 - [Docker Deployment](docs/getting-started.md#docker-deployment)
 - [Networking Options](docs/getting-started.md#networking-options)
 - [Environment Variables](docs/getting-started.md#environment-variables)
@@ -139,6 +165,16 @@ Each service document includes:
 - Sample curl commands with your node's address
 - Sample JSON responses
 - How NodeRouter uses each piece of data
+
+---
+
+## Acknowledgments
+
+A number of NodeRouter features were inspired by and referenced from these excellent projects:
+
+- **[Samourai Dojo](https://github.com/Dojo-Open-Source-Project/samourai-dojo)** ([dojo-osp.org](https://dojo-osp.org/)) — Bitcoin backend server with Auth47 authentication, Tor hidden service support, and BIP47 payment code integration
+- **[bip47-website](https://github.com/linkinparkrulz/bip47-website)** ([paymentcode.io](https://paymentcode.io/)) — BIP47 Auth47 authentication demo site with Paynym avatar integration
+- **[Mempal](https://github.com/aeonBTC/Mempal)** — Android app for monitoring Bitcoin mempool fees and notifications
 
 ---
 
