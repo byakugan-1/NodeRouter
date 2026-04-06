@@ -15,7 +15,9 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -38,6 +40,14 @@ type Config struct {
 	Mempool               MempoolCfg `yaml:"mempool"`
 	Fulcrum               FulcrumCfg `yaml:"fulcrum"`
 	Monero                MoneroCfg  `yaml:"monero"`
+	Notifications         NotifCfg   `yaml:"notifications"`
+}
+
+type NotifCfg struct {
+	GotifyURL   string `yaml:"gotify_url"`
+	GotifyToken string `yaml:"gotify_token"`
+	Enabled     bool   `yaml:"enabled"`
+	CheckFreq   int    `yaml:"check_freq"`
 }
 
 type BitcoinCfg struct {
@@ -80,7 +90,64 @@ var (
 	cfg           *Config
 	cfgPath       string
 	faviconVer    int64 // increments on each config reload for cache-busting
+	sseHub        *Hub
+	notifMu       sync.RWMutex
+	notifSettings *NotifSettings
+	lastBlockHeight int
 )
+
+// txIDRegex validates hex TXIDs (64 hex chars)
+var txIDRegex = regexp.MustCompile(`^[0-9a-fA-F]{64}$`)
+
+// NotifSettings holds ephemeral notification settings (not saved to config)
+type NotifSettings struct {
+	FeeEnabled          bool           `json:"fee_enabled"`
+	FeeThreshold        float64        `json:"fee_threshold"`
+	FeeAboveThreshold   bool           `json:"fee_above_threshold"`
+	FeeType             string         `json:"fee_type"`
+	FeeNotified         bool           `json:"fee_notified"`
+	NewBlockEnabled     bool           `json:"new_block_enabled"`
+	SpecificBlockEnabled bool          `json:"specific_block_enabled"`
+	SpecificBlockHeight int            `json:"specific_block_height"`
+	SpecificBlockNotified bool         `json:"specific_block_notified"`
+	TxWatches           []TxWatchEntry `json:"tx_watches"`
+}
+
+type TxWatchEntry struct {
+	TxID          string `json:"txid"`
+	Notified      bool   `json:"notified"`
+	Confirmations int    `json:"confirmations"`
+	TargetConfs   int    `json:"target_confs"`
+}
+
+type NotifSettingsResponse struct {
+	RefreshInterval int    `json:"refresh_interval"`
+	ShowLatency     bool   `json:"show_latency"`
+	BtcBlocksCount  int    `json:"btc_blocks_count"`
+	XmrBlocksCount  int    `json:"xmr_blocks_count"`
+	ConnBtcRpc      string `json:"conn_btc_rpc"`
+	ConnBtcUser     string `json:"conn_btc_user"`
+	ConnBtcPass     string `json:"conn_btc_pass"`
+	SvcMpEnabled    bool   `json:"svc_mp_enabled"`
+	ConnMpApi       string `json:"conn_mp_api"`
+	SvcFulEnabled   bool   `json:"svc_ful_enabled"`
+	ConnFulcrum     string `json:"conn_fulcrum"`
+	SvcXmrEnabled   bool   `json:"svc_xmr_enabled"`
+	ConnXmrRpc      string `json:"conn_xmr_rpc"`
+	GotifyURL       string `json:"gotify_url"`
+	GotifyToken     string `json:"gotify_token"`
+	GotifyConfigured bool  `json:"gotify_configured"`
+	NotifEnabled    bool   `json:"notif_enabled"`
+	CheckFreq       int    `json:"check_freq"`
+	FeeNotifEnabled bool   `json:"fee_notif_enabled"`
+	FeeThreshold    float64 `json:"fee_threshold"`
+	FeeAboveThreshold bool `json:"fee_above_threshold"`
+	NewBlockNotif   bool   `json:"new_block_notif"`
+	SpecificBlockNotif bool `json:"specific_block_notif"`
+	SpecificBlockHeight int `json:"specific_block_height"`
+	TxWatches       []TxWatchEntry `json:"tx_watches"`
+	TxTargetConfs   int    `json:"tx_target_confs"`
+}
 
 // faviconMap maps known icon names to their local filenames in static/logos/
 var faviconMap = map[string]string{
@@ -129,6 +196,18 @@ func loadConfig() error {
 	cfgMu.Unlock()
 	log.Printf("[Config] Loaded from %s (interval: %ds)", cfgPath, c.GlobalRefreshInterval)
 	return nil
+}
+
+// writeConfig writes the current config to the config file
+func writeConfig() error {
+	cfgMu.RLock()
+	c := cfg
+	cfgMu.RUnlock()
+	data, err := yaml.Marshal(c)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(cfgPath, data, 0644)
 }
 
 func getConfig() *Config {
@@ -426,6 +505,8 @@ type DashboardData struct {
 	FaviconVer    int64              `json:"favicon_ver"`
 	ConfigChanged bool               `json:"config_changed"`
 	ShowLatency   bool               `json:"show_latency"`
+	NotifEnabled  bool               `json:"notif_enabled"`
+	RefreshStart  int64              `json:"refresh_start"`
 }
 
 // ==================== State ====================
@@ -531,6 +612,9 @@ func pollAll() {
 	}
 
 	now := time.Now().Unix()
+	// Calculate refresh start time (last refresh time + interval)
+	refreshStart := now - int64(c.GlobalRefreshInterval)
+	
 	dataMu.Lock()
 	dashData = &DashboardData{
 		Bitcoin:       btc,
@@ -544,6 +628,8 @@ func pollAll() {
 		FaviconVer:    faviconVer,
 		ConfigChanged: false,
 		ShowLatency:   c.ShowLatency,
+		NotifEnabled:  c.Notifications.Enabled && c.Notifications.GotifyURL != "" && c.Notifications.GotifyToken != "",
+		RefreshStart:  refreshStart,
 	}
 	lastSuccess = now
 	dataMu.Unlock()
@@ -855,6 +941,11 @@ func pollBitcoin(c BitcoinCfg) *BitcoinData {
 func pollMempool(c MempoolCfg) *MempoolData {
 	start := time.Now()
 	api := strings.TrimRight(c.APIEndpoint, "/")
+	
+	// Auto-append /api if not present
+	if !strings.HasSuffix(api, "/api") {
+		api = api + "/api"
+	}
 	
 	// Use /api/v1/fees/precise for subsat, /api/v1/fees/recommended for normal
 	var fees map[string]float64
@@ -1433,7 +1524,6 @@ func mempoolClass(pct float64) string {
 
 // ==================== Main ====================
 
-var sseHub *Hub
 var tpl *template.Template
 
 func main() {
@@ -1482,6 +1572,30 @@ func main() {
 				"last_successful_refresh": d.LastSuccess,
 				"refresh_interval":      d.RefreshInt,
 			})
+		}
+	}()
+
+	// Notification checker goroutine (separate from dashboard refresh)
+	go func() {
+		for {
+			c := getConfig()
+			freq := time.Duration(c.Notifications.CheckFreq) * time.Second
+			if freq < 10*time.Second {
+				freq = 10 * time.Second
+			}
+			if freq > 300*time.Second {
+				freq = 300 * time.Second
+			}
+			ticker := time.NewTicker(freq)
+			<-ticker.C
+			ticker.Stop()
+
+			// Run notification check with current data
+			dataMu.RLock()
+			mp := dashData.Mempool
+			btc := dashData.Bitcoin
+			dataMu.RUnlock()
+			checkNotifications(mp, btc)
 		}
 	}()
 
@@ -1620,6 +1734,7 @@ func main() {
 	})
 
 	http.HandleFunc("/sse/stream", sseHub.ServeHTTP)
+	http.HandleFunc("/api/notifications", handleNotificationsAPI)
 
 	log.Printf("[Main] Server on 0.0.0.0:%s", *port)
 	log.Printf("[Main] Dashboard at http://localhost:%s", *port)
@@ -1628,4 +1743,494 @@ func main() {
 	if err := http.ListenAndServe(":"+*port, nil); err != nil {
 		log.Fatalf("[Main] %v", err)
 	}
+}
+
+// handleNotificationsAPI handles GET and POST requests for notification settings
+func handleNotificationsAPI(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	switch r.Method {
+	case http.MethodGet:
+		c := getConfig()
+		notifMu.RLock()
+		txWatches := []TxWatchEntry{}
+		if notifSettings != nil {
+			txWatches = make([]TxWatchEntry, len(notifSettings.TxWatches))
+			copy(txWatches, notifSettings.TxWatches)
+		}
+		notifMu.RUnlock()
+
+		resp := NotifSettingsResponse{
+			RefreshInterval:     c.GlobalRefreshInterval,
+			ShowLatency:         c.ShowLatency,
+			BtcBlocksCount:      c.BitcoinCore.RecentBlocksCount,
+			XmrBlocksCount:      c.Monero.RecentBlocksCount,
+			ConnBtcRpc:          c.BitcoinCore.RPCAddress,
+			ConnBtcUser:         c.BitcoinCore.RPCUser,
+			ConnBtcPass:         c.BitcoinCore.RPCPassword,
+			SvcMpEnabled:        c.Mempool.Enabled,
+			ConnMpApi:           c.Mempool.APIEndpoint,
+			SvcFulEnabled:       c.Fulcrum.Enabled,
+			ConnFulcrum:         fmt.Sprintf("%s:%d", c.Fulcrum.RPCAddress, c.Fulcrum.RPCPort),
+			SvcXmrEnabled:       c.Monero.Enabled,
+			ConnXmrRpc:          c.Monero.RPCAddress,
+			GotifyURL:           c.Notifications.GotifyURL,
+			GotifyToken:         c.Notifications.GotifyToken,
+			GotifyConfigured:    c.Notifications.GotifyURL != "" && c.Notifications.GotifyToken != "",
+			NotifEnabled:        c.Notifications.Enabled,
+			CheckFreq:           c.Notifications.CheckFreq,
+			FeeNotifEnabled:     func() bool { if notifSettings != nil { return notifSettings.FeeEnabled }; return false }(),
+			FeeThreshold:        func() float64 { if notifSettings != nil { return notifSettings.FeeThreshold }; return 0 }(),
+			FeeAboveThreshold:   func() bool { if notifSettings != nil { return notifSettings.FeeAboveThreshold }; return false }(),
+			NewBlockNotif:       func() bool { if notifSettings != nil { return notifSettings.NewBlockEnabled }; return false }(),
+			SpecificBlockNotif:  func() bool { if notifSettings != nil { return notifSettings.SpecificBlockEnabled }; return false }(),
+			SpecificBlockHeight: func() int { if notifSettings != nil { return notifSettings.SpecificBlockHeight }; return 0 }(),
+			TxWatches:           txWatches,
+			TxTargetConfs:       1,
+		}
+		json.NewEncoder(w).Encode(resp)
+
+	case http.MethodPost:
+		var req struct {
+			Action              string  `json:"action"`
+			RefreshInterval     int     `json:"refresh_interval"`
+			ShowLatency         bool    `json:"show_latency"`
+			BtcBlocksCount      int     `json:"btc_blocks_count"`
+			XmrBlocksCount      int     `json:"xmr_blocks_count"`
+			SvcMpEnabled        bool    `json:"svc_mp_enabled"`
+			SvcFulEnabled       bool    `json:"svc_ful_enabled"`
+			SvcXmrEnabled       bool    `json:"svc_xmr_enabled"`
+			ConnBtcRpc          string  `json:"conn_btc_rpc"`
+			ConnBtcUser         string  `json:"conn_btc_user"`
+			ConnBtcPass         string  `json:"conn_btc_pass"`
+			ConnMpApi           string  `json:"conn_mp_api"`
+			ConnFulcrum         string  `json:"conn_fulcrum"`
+			ConnXmrRpc          string  `json:"conn_xmr_rpc"`
+			GotifyURL           string  `json:"gotify_url"`
+			GotifyToken         string  `json:"gotify_token"`
+			NotifEnabled        bool    `json:"notif_enabled"`
+			CheckFreq           int     `json:"check_freq"`
+			FeeNotifEnabled     bool    `json:"fee_notif_enabled"`
+			FeeThreshold        float64 `json:"fee_threshold"`
+			FeeAboveThreshold   bool    `json:"fee_above_threshold"`
+			NewBlockNotif       bool    `json:"new_block_notif"`
+			SpecificBlockNotif  bool    `json:"specific_block_notif"`
+			SpecificBlockHeight int     `json:"specific_block_height"`
+			TxID                string  `json:"txid"`
+			TxTargetConfs       int     `json:"tx_target_confs"`
+			TestName            string  `json:"test_name"`
+			TestURL             string  `json:"test_url"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			w.Write([]byte(`{"success":false,"message":"invalid json"}`))
+			return
+		}
+
+		if req.Action == "test" {
+			if req.GotifyURL == "" || req.GotifyToken == "" {
+				w.Write([]byte(`{"success":false,"message":"Gotify URL and Token required"}`))
+				return
+			}
+			err := sendGotifyTest(req.GotifyURL, req.GotifyToken)
+			if err != nil {
+				w.Write([]byte(fmt.Sprintf(`{"success":false,"message":"%s"}`, err.Error())))
+			} else {
+				w.Write([]byte(`{"success":true,"message":"Test notification sent successfully"}`))
+			}
+			return
+		}
+
+		if req.Action == "test_connection" {
+			var success bool
+			var msg string
+			switch req.TestName {
+			case "bitcoin":
+				rpcURL := strings.TrimRight(req.TestURL, "/")
+				result := rpcCall(rpcURL, req.ConnBtcUser, req.ConnBtcPass, "getblockchaininfo", nil)
+				if result != nil {
+					success = true
+					msg = "Bitcoin Core connected"
+				} else {
+					msg = "Bitcoin Core connection failed"
+				}
+			case "mempool":
+				apiURL := strings.TrimRight(req.TestURL, "/")
+				// Auto-append /api if not present
+				if !strings.HasSuffix(apiURL, "/api") {
+					apiURL = apiURL + "/api"
+				}
+				var fees map[string]float64
+				err := getJSON(apiURL+"/v1/fees/recommended", &fees)
+				if err == nil {
+					success = true
+					msg = "Mempool connected"
+				} else {
+					msg = "Mempool connection failed"
+				}
+			case "fulcrum":
+				parts := strings.Split(req.TestURL, ":")
+				if len(parts) == 2 {
+					addr := parts[0]
+					var port int
+					fmt.Sscanf(parts[1], "%d", &port)
+					conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", addr, port))
+					if err == nil {
+						conn.Close()
+						success = true
+						msg = "Fulcrum connected"
+					} else {
+						msg = "Fulcrum connection failed"
+					}
+				} else {
+					msg = "Invalid Fulcrum address"
+				}
+			case "monero":
+				rpcURL := strings.TrimRight(req.TestURL, "/")
+				var info map[string]interface{}
+				err := getJSON(rpcURL+"/get_info", &info)
+				if err == nil {
+					success = true
+					msg = "Monero connected"
+				} else {
+					msg = "Monero connection failed"
+				}
+			default:
+				msg = "Unknown service"
+			}
+			w.Write([]byte(fmt.Sprintf(`{"success":%t,"message":"%s"}`, success, msg)))
+			return
+		}
+
+		if req.Action == "clear_tx" {
+			notifMu.Lock()
+			if notifSettings != nil {
+				notifSettings.TxWatches = nil
+			}
+			notifMu.Unlock()
+			w.Write([]byte(`{"success":true,"message":"All TX watches cleared"}`))
+			return
+		}
+
+		if req.Action == "save" {
+			cfgMu.Lock()
+			c := cfg
+			// Global settings
+			if req.RefreshInterval >= 5 && req.RefreshInterval <= 120 {
+				c.GlobalRefreshInterval = req.RefreshInterval
+			}
+			c.ShowLatency = req.ShowLatency
+			if req.BtcBlocksCount >= 6 && req.BtcBlocksCount <= 30 {
+				c.BitcoinCore.RecentBlocksCount = req.BtcBlocksCount
+			}
+			if req.XmrBlocksCount >= 6 && req.XmrBlocksCount <= 30 {
+				c.Monero.RecentBlocksCount = req.XmrBlocksCount
+			}
+			// Service connections
+			c.BitcoinCore.Enabled = true
+			if req.ConnBtcRpc != "" {
+				c.BitcoinCore.RPCAddress = req.ConnBtcRpc
+			}
+			if req.ConnBtcUser != "" {
+				c.BitcoinCore.RPCUser = req.ConnBtcUser
+			}
+			if req.ConnBtcPass != "" {
+				c.BitcoinCore.RPCPassword = req.ConnBtcPass
+			}
+			c.Mempool.Enabled = req.SvcMpEnabled
+			if req.ConnMpApi != "" {
+				c.Mempool.APIEndpoint = req.ConnMpApi
+			}
+			c.Fulcrum.Enabled = req.SvcFulEnabled
+			if req.ConnFulcrum != "" {
+				parts := strings.Split(req.ConnFulcrum, ":")
+				if len(parts) == 2 {
+					c.Fulcrum.RPCAddress = parts[0]
+					fmt.Sscanf(parts[1], "%d", &c.Fulcrum.RPCPort)
+				}
+			}
+			c.Monero.Enabled = req.SvcXmrEnabled
+			if req.ConnXmrRpc != "" {
+				c.Monero.RPCAddress = req.ConnXmrRpc
+			}
+			// Notifications
+			c.Notifications.GotifyURL = req.GotifyURL
+			if req.GotifyToken != "" {
+				c.Notifications.GotifyToken = req.GotifyToken
+			}
+			c.Notifications.Enabled = req.NotifEnabled
+			if req.CheckFreq >= 10 && req.CheckFreq <= 300 {
+				c.Notifications.CheckFreq = req.CheckFreq
+			}
+			cfgMu.Unlock()
+
+			// Update ephemeral notification settings
+			notifMu.Lock()
+			if notifSettings == nil {
+				notifSettings = &NotifSettings{FeeType: "next_block"}
+			}
+			notifSettings.FeeEnabled = req.FeeNotifEnabled
+			notifSettings.FeeThreshold = req.FeeThreshold
+			notifSettings.FeeAboveThreshold = req.FeeAboveThreshold
+			notifSettings.FeeNotified = false
+			notifSettings.NewBlockEnabled = req.NewBlockNotif
+			notifSettings.SpecificBlockEnabled = req.SpecificBlockNotif
+			notifSettings.SpecificBlockHeight = req.SpecificBlockHeight
+			notifSettings.SpecificBlockNotified = false
+			notifMu.Unlock()
+
+			// Add TX if provided
+			if req.TxID != "" && txIDRegex.MatchString(req.TxID) {
+				notifMu.Lock()
+				found := false
+				for _, existing := range notifSettings.TxWatches {
+					if existing.TxID == req.TxID {
+						found = true
+						break
+					}
+				}
+				if !found {
+					notifSettings.TxWatches = append(notifSettings.TxWatches, TxWatchEntry{
+						TxID:        req.TxID,
+						TargetConfs: req.TxTargetConfs,
+					})
+				}
+				notifMu.Unlock()
+			}
+
+			// Write config to file
+			if err := writeConfig(); err != nil {
+				w.Write([]byte(fmt.Sprintf(`{"success":false,"message":"Failed to save config: %s"}`, err.Error())))
+				return
+			}
+
+			w.Write([]byte(`{"success":true,"message":"Settings saved to config.yaml"}`))
+			return
+		}
+
+		if req.Action == "remove_tx" && req.TxID != "" {
+			if !txIDRegex.MatchString(req.TxID) {
+				w.Write([]byte(`{"success":false,"message":"Invalid TXID"}`))
+				return
+			}
+			notifMu.Lock()
+			if notifSettings != nil {
+				var filtered []TxWatchEntry
+				for _, tx := range notifSettings.TxWatches {
+					if tx.TxID != req.TxID {
+						filtered = append(filtered, tx)
+					}
+				}
+				notifSettings.TxWatches = filtered
+			}
+			notifMu.Unlock()
+			w.Write([]byte(`{"success":true,"message":"TX removed"}`))
+			return
+		}
+
+		w.Write([]byte(`{"success":false,"message":"invalid action"}`))
+
+	default:
+		w.Write([]byte(`{"success":false,"message":"method not allowed"}`))
+	}
+}
+
+// sendGotifyTest sends a test notification to Gotify
+func sendGotifyTest(gotifyURL, gotifyToken string) error {
+	parsed, err := url.Parse(gotifyURL)
+	if err != nil {
+		return fmt.Errorf("invalid URL")
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return fmt.Errorf("URL must be http or https")
+	}
+
+	baseURL := strings.TrimRight(gotifyURL, "/")
+	msg := GotifyMessage{
+		Title:    "NodeRouter Test",
+		Message:  "This is a test notification from NodeRouter. Your Gotify integration is working correctly!",
+		Priority: 5,
+	}
+	body, _ := json.Marshal(msg)
+
+	req, _ := http.NewRequest("POST", baseURL+"/message", strings.NewReader(string(body)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Gotify-Key", gotifyToken)
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("gotify returned status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// checkNotifications checks notification conditions
+func checkNotifications(mp *MempoolData, btc *BitcoinData) {
+	c := getConfig()
+	if !c.Notifications.Enabled || c.Notifications.GotifyURL == "" || c.Notifications.GotifyToken == "" {
+		return
+	}
+
+	notifMu.Lock()
+	defer notifMu.Unlock()
+
+	if notifSettings == nil {
+		notifSettings = &NotifSettings{FeeType: "next_block"}
+	}
+
+	if mp == nil || !mp.Connected {
+		return
+	}
+
+	// Fee rate notifications
+	if notifSettings.FeeEnabled && notifSettings.FeeThreshold > 0 {
+		currentRate := mp.Fastest
+		shouldNotify := false
+		if notifSettings.FeeAboveThreshold {
+			shouldNotify = currentRate > notifSettings.FeeThreshold
+		} else {
+			shouldNotify = currentRate < notifSettings.FeeThreshold
+		}
+
+		if shouldNotify && !notifSettings.FeeNotified {
+			condition := "fallen below"
+			if notifSettings.FeeAboveThreshold {
+				condition = "risen above"
+			}
+			err := sendGotify("Fee Rate Alert",
+				fmt.Sprintf("Bitcoin fee rate has %s your threshold of %.1f sat/vB and is currently at %.1f sat/vB",
+					condition, notifSettings.FeeThreshold, currentRate), 5)
+			if err == nil {
+				notifSettings.FeeNotified = true
+			}
+		} else if !shouldNotify {
+			notifSettings.FeeNotified = false
+		}
+	}
+
+	// New block notifications
+	if notifSettings.NewBlockEnabled && btc != nil && btc.Blocks > 0 {
+		if lastBlockHeight > 0 && btc.Blocks > lastBlockHeight {
+			sendGotify("New Bitcoin Block Mined",
+				fmt.Sprintf("Block #%d has been mined on the Bitcoin network", btc.Blocks), 3)
+		}
+		lastBlockHeight = btc.Blocks
+	}
+
+	// Specific block notifications
+	if notifSettings.SpecificBlockEnabled && btc != nil && btc.Blocks > 0 {
+		if !notifSettings.SpecificBlockNotified && btc.Blocks >= notifSettings.SpecificBlockHeight {
+			sendGotify("Target Block Height Reached",
+				fmt.Sprintf("Bitcoin block height %d has been reached!", notifSettings.SpecificBlockHeight), 8)
+			notifSettings.SpecificBlockNotified = true
+		}
+	}
+
+	// TX confirmation notifications
+	if len(notifSettings.TxWatches) > 0 && mp.Connected {
+		apiEndpoint := strings.TrimRight(c.Mempool.APIEndpoint, "/")
+		// Auto-append /api if not present
+		if !strings.HasSuffix(apiEndpoint, "/api") {
+			apiEndpoint = apiEndpoint + "/api"
+		}
+		var remaining []TxWatchEntry
+		for _, watch := range notifSettings.TxWatches {
+			if watch.Notified {
+				continue
+			}
+			if !txIDRegex.MatchString(watch.TxID) {
+				continue
+			}
+			var txInfo struct {
+				TxID string `json:"txid"`
+				Status struct {
+					Confirmed    bool `json:"confirmed"`
+					BlockHeight  int  `json:"block_height"`
+					Confirmations int `json:"confirmations"`
+				} `json:"status"`
+			}
+			err := getJSON(apiEndpoint+"/tx/"+watch.TxID, &txInfo)
+			if err != nil {
+				remaining = append(remaining, watch)
+				continue
+			}
+			if txInfo.Status.Confirmed {
+				confs := txInfo.Status.Confirmations
+				if confs == 0 {
+					confs = 1
+				}
+				target := watch.TargetConfs
+				if target <= 0 {
+					target = 1
+				}
+				if confs >= target {
+					txPreview := watch.TxID
+					if len(txPreview) >= 8 {
+						txPreview = txPreview[:4] + "..." + txPreview[len(txPreview)-4:]
+					}
+					sendGotify("Transaction Confirmed",
+						fmt.Sprintf("Your Bitcoin transaction (%s) has been confirmed with %d confirmations in block %d",
+							txPreview, confs, txInfo.Status.BlockHeight), 8)
+					watch.Notified = true
+					watch.Confirmations = confs
+				}
+				remaining = append(remaining, watch)
+			} else {
+				remaining = append(remaining, watch)
+			}
+		}
+		notifSettings.TxWatches = remaining
+	}
+}
+
+// GotifyMessage represents a Gotify notification
+type GotifyMessage struct {
+	Title    string `json:"title"`
+	Message  string `json:"message"`
+	Priority int    `json:"priority"`
+}
+
+// sendGotify sends a notification to Gotify
+func sendGotify(title, message string, priority int) error {
+	c := getConfig()
+	if !c.Notifications.Enabled || c.Notifications.GotifyURL == "" || c.Notifications.GotifyToken == "" {
+		return fmt.Errorf("gotify not configured")
+	}
+
+	parsed, err := url.Parse(c.Notifications.GotifyURL)
+	if err != nil {
+		return fmt.Errorf("invalid gotify URL")
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return fmt.Errorf("gotify URL must be http or https")
+	}
+
+	msg := GotifyMessage{
+		Title:    title,
+		Message:  message,
+		Priority: priority,
+	}
+	body, _ := json.Marshal(msg)
+
+	baseURL := strings.TrimRight(c.Notifications.GotifyURL, "/")
+	req, _ := http.NewRequest("POST", baseURL+"/message", strings.NewReader(string(body)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Gotify-Key", c.Notifications.GotifyToken)
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("gotify returned status %d", resp.StatusCode)
+	}
+	return nil
 }

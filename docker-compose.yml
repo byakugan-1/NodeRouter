@@ -57,9 +57,9 @@ services:
     # ------------------------------------------
     # CONFIGURATION VOLUME
     # ------------------------------------------
-    # Mount your config file (read-only for security)
+    # Mount your config file (read-write so settings can be saved)
     volumes:
-      - ./config.yaml:/app/config.yaml:ro
+      - ./config.yaml:/app/config.yaml
 
     # ------------------------------------------
     # RESTART POLICY

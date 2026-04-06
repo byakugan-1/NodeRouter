@@ -27,6 +27,7 @@ NodeRouter is a unified monitoring dashboard for self-hosted Bitcoin and Monero 
 - **Mempool Space** — Shows real-time fee estimates across multiple confirmation tiers, BTC price, and difficulty epoch progress with estimated change percentage.
 - **Fulcrum** — Monitors Electrum server sync progress against Bitcoin Core's known headers, displaying version and sync status.
 - **Monero** — Presents node sync status, network difficulty, total transactions since genesis, database size, transaction pool size, and a recent blocks visualization.
+- **Gotify Notifications** — Push notifications for fee rate changes, mempool size alerts, new blocks, specific block heights, and TX confirmation tracking. Configured via the Settings modal in the footer.
 
 **How it works:**
 
@@ -131,6 +132,7 @@ Detailed documentation of every RPC/REST API call NodeRouter makes to each servi
 | **Mempool Space** | [docs/service-stats/mempool-space.md](docs/service-stats/mempool-space.md) |
 | **Fulcrum** | [docs/service-stats/fulcrum.md](docs/service-stats/fulcrum.md) |
 | **Monero** | [docs/service-stats/monero.md](docs/service-stats/monero.md) |
+| **Notifications** | [docs/service-stats/notifications.md](docs/service-stats/notifications.md) |
 
 Each service document includes:
 - Complete list of RPC/API calls made
